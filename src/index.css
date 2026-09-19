@@ -1,0 +1,156 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+@import "./styles/theme.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: var(--font-sans-stack);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --font-sans-stack:
+    "abcNormal", "abcNormal Fallback", "Geist Variable", ui-sans-serif,
+    system-ui, "Helvetica Neue", Arial, sans-serif;
+
+  /* DESIGN.md — colors */
+  --background: #ffffff; /* canvas */
+  --foreground: #030303; /* ink */
+  --card: #ffffff; /* canvas */
+  --card-foreground: #030303; /* ink */
+  --popover: #ffffff; /* canvas */
+  --popover-foreground: #030303; /* ink */
+  --primary: #000000; /* colors.primary */
+  --primary-foreground: #ffffff; /* colors.on-primary */
+  --secondary: #f6f6f6;
+  --secondary-foreground: #1a1a1a; /* ink-soft */
+  --muted: #f6f6f6;
+  --muted-foreground: #404040; /* graphite */
+  --accent: #f6f6f6;
+  --accent-foreground: #1a1a1a; /* ink-soft */
+  --destructive: #8a1c1c;
+  --border: #e7eaf0; /* hairline */
+  --input: #e7eaf0; /* hairline */
+  --ring: #1a1a1a; /* ink-soft */
+  --chart-1: #030303;
+  --chart-2: #404040;
+  --chart-3: #676f7b;
+  --chart-4: #939393;
+  --chart-5: #c9ccd1;
+  --radius: 0.625rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #030303;
+  --sidebar-primary: #000000;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f6f6f6;
+  --sidebar-accent-foreground: #1a1a1a;
+  --sidebar-border: #e7eaf0;
+  --sidebar-ring: #1a1a1a;
+}
+
+.dark {
+  --background: #030303;
+  --foreground: #ffffff;
+  --card: #111111;
+  --card-foreground: #ffffff;
+  --popover: #111111;
+  --popover-foreground: #ffffff;
+  --primary: #ffffff;
+  --primary-foreground: #000000;
+  --secondary: #1a1a1a;
+  --secondary-foreground: #ffffff;
+  --muted: #1a1a1a;
+  --muted-foreground: #999999;
+  --accent: #1a1a1a;
+  --accent-foreground: #ffffff;
+  --destructive: #c15f5f;
+  --border: #262626;
+  --input: #262626;
+  --ring: #999999;
+  --chart-1: #ffffff;
+  --chart-2: #939393;
+  --chart-3: #676f7b;
+  --chart-4: #404040;
+  --chart-5: #1a1a1a;
+  --sidebar: #111111;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #1a1a1a;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #262626;
+  --sidebar-ring: #999999;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  html {
+    @apply font-sans;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  summary,
+  label[for],
+  input[type="file"] {
+    cursor: pointer;
+  }
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+  input,
+  textarea,
+  select {
+    cursor: text;
+  }
+  select {
+    cursor: pointer;
+  }
+}
