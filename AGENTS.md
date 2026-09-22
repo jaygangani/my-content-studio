@@ -26,9 +26,13 @@ storage), and a **PWA** service worker. The visual language follows
 
 ## Hard rules (do not violate)
 
-1. **Never deploy or push to AWS.** No `ampx sandbox`, `ampx deploy`, or any
-   command that creates/updates cloud resources unless the user explicitly
-   asks. Initialising/editing local `amplify/` files is fine.
+1. **Never deploy or push to AWS on your own initiative.** No `ampx sandbox`,
+   `ampx deploy`, `ampx pipeline-deploy`, or any command that creates/updates
+   cloud resources unless the user explicitly asks. Initialising/editing local
+   `amplify/` files is fine. There is **no CI/pipeline configured**; the user
+   deploys backend and frontend manually. Do not add deploy scripts or assume
+   a pipeline exists. State clearly what any deploy would affect before it
+   runs.
 2. If AWS credentials are ever needed, the user uses
    `export AWS_PROFILE=jaygangani`. Never commit credentials or write them to
    files.
@@ -95,6 +99,13 @@ src/
   and exports the typed `dataClient`. Backend is defined in `amplify/`
   (`auth`, `data` with the `Apps` model, `storage` `media/*`).
   `amplify_outputs.json` is generated/refreshed only by deploy/sandbox.
+- **Hosting** — `amplify.yml` (repo root) is the **Amplify Hosting** build
+  spec: `npm ci` → `npm run build`, artifacts from `dist/`, SPA rewrite of
+  extensionless paths to `/index.html`, plus cache/header rules. Static SPA
+  only — the Amplify backend (auth/data/storage) is untouched by hosting.
+  Connect a branch in the Amplify console to use it; set the `VITE_*` env vars
+  there (they are baked in at build). Deploys are manual (see Hard rules) —
+  never run `ampx` commands or push unprompted.
 - **PWA** — `vite-plugin-pwa` generates `sw.js` + `manifest.webmanifest` at
   build. The app registers the SW in `src/main.tsx`.
 - **Env vars** — only `VITE_*` vars reach the client. `VITE_PEXELS_API_KEY`

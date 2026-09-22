@@ -40,7 +40,7 @@ export interface ContentInput {
   postedOn?: string
   angel?: string
   relatabilityHook?: string
-  overlayText?: string
+  overlayText?: string | null
   videoKeywords?: string[]
   videoConfigurations?: string
   audioConfig?: string

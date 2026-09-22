@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Download, Loader2, Pause, Play, RefreshCw, Shuffle } from 'lucide-react'
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import type { RefObject } from 'react'
+import { Loader2, Pause, Play, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { searchVideos } from '@/services/pexels'
@@ -13,17 +21,27 @@ import type { OverlaySegment } from '@/types/content'
 
 interface ContentRendererProps {
   content: ContentItem
+  ref?: RefObject<ContentRendererHandle | null>
+  onRenderState?: (state: {
+    canRender: boolean
+    rendering: boolean
+  }) => void
+}
+
+export interface ContentRendererHandle {
+  render: () => void
 }
 
 interface AudioGraph {
   ctx: AudioContext
-  videoGain: GainNode
   musicGain: GainNode
   destination: MediaStreamAudioDestinationNode
 }
 
 type VerticalAlign = 'top' | 'center' | 'bottom'
 type HorizontalAlign = 'left' | 'center' | 'right'
+
+const VIDEO_LENGTH_PRESETS = [5, 10, 15, 20] as const
 
 function alignment(position: string): {
   vertical: VerticalAlign
@@ -140,25 +158,19 @@ function sanitizeFilePart(value: string): string {
   )
 }
 
-/**
- * Best-effort check for an audio track. Returns null when the browser gives
- * no hint (Chrome only reveals it through `captureStream`).
- */
-function detectVideoAudio(video: HTMLVideoElement): boolean | null {
-  const element = video as HTMLVideoElement & {
-    mozHasAudio?: boolean
-    audioTracks?: { length: number }
-    captureStream?: () => MediaStream
+function parseVideoConfig(value: unknown): Record<string, unknown> {
+  if (value === null || value === undefined) return {}
+  let parsed: unknown = value
+  if (typeof value === 'string') {
+    if (!value.trim()) return {}
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      return {}
+    }
   }
-  try {
-    const stream = element.captureStream?.()
-    if (stream) return stream.getAudioTracks().length > 0
-  } catch {
-    /* ignore */
-  }
-  if (typeof element.mozHasAudio === 'boolean') return element.mozHasAudio
-  if (element.audioTracks) return element.audioTracks.length > 0
-  return null
+  if (typeof parsed !== 'object' || parsed === null) return {}
+  return parsed as Record<string, unknown>
 }
 
 /**
@@ -166,7 +178,11 @@ function detectVideoAudio(video: HTMLVideoElement): boolean | null {
  * overlays the saved text timeline, and renders a downloadable file with the
  * overlays burned in.
  */
-export function ContentRenderer({ content }: ContentRendererProps) {
+export function ContentRenderer({
+  content,
+  ref,
+  onRenderState,
+}: ContentRendererProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -189,13 +205,33 @@ export function ContentRenderer({ content }: ContentRendererProps) {
   const [resultIndex, setResultIndex] = useState(0)
   const [keywordIndex, setKeywordIndex] = useState(0)
   const [page, setPage] = useState(1)
+  const [keywordList, setKeywordList] = useState<string[]>(() =>
+    (content.videoKeywords ?? []).filter(
+      (keyword): keyword is string => Boolean(keyword),
+    ),
+  )
+  const [keywordInput, setKeywordInput] = useState('')
+  const [keywordsError, setKeywordsError] = useState<string | null>(null)
+  const [editingKeyword, setEditingKeyword] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
   const [tracks, setTracks] = useState<MusicTrack[]>([])
   const [trackIndex, setTrackIndex] = useState(0)
+  const [musicPage, setMusicPage] = useState(1)
   const [trackLoading, setTrackLoading] = useState(true)
   const [trackError, setTrackError] = useState<string | null>(null)
-  const [videoVolume, setVideoVolume] = useState(0.5)
   const [musicVolume, setMusicVolume] = useState(0.8)
-  const [videoHasAudio, setVideoHasAudio] = useState<boolean | null>(null)
+  const initialVideoConfig = useMemo(
+    () => parseVideoConfig(content.videoConfigurations),
+    [content.videoConfigurations],
+  )
+  const [finalDuration, setFinalDurationState] = useState<number | null>(() => {
+    const saved = initialVideoConfig.duration
+    return typeof saved === 'number' && Number.isFinite(saved) && saved > 0
+      ? Math.min(20, saved)
+      : null
+  })
+  const [scrubbing, setScrubbing] = useState(false)
+  const [scrubValue, setScrubValue] = useState<number | null>(null)
   const [segments, setSegments] = useState<OverlaySegment[]>(savedSegments)
   const [baseline, setBaseline] = useState(() =>
     JSON.stringify(savedSegments),
@@ -203,6 +239,12 @@ export function ContentRenderer({ content }: ContentRendererProps) {
   const [savingTimings, setSavingTimings] = useState(false)
   const [timingsError, setTimingsError] = useState<string | null>(null)
   const [timingsSaved, setTimingsSaved] = useState(false)
+  const [newSegmentText, setNewSegmentText] = useState('')
+  const [editingSegmentId, setEditingSegmentId] = useState<number | null>(null)
+  const [segmentEditText, setSegmentEditText] = useState('')
+  const [durationError, setDurationError] = useState<string | null>(null)
+
+  const totalLength = finalDuration ?? (duration || 0)
 
   useEffect(() => {
     setSegments(savedSegments)
@@ -211,6 +253,54 @@ export function ContentRenderer({ content }: ContentRendererProps) {
     setTimingsError(null)
   }, [savedSegments])
 
+  useEffect(() => {
+    if (!finalDuration || finalDuration <= 0) return
+    setSegments((prev) => {
+      let changed = false
+      const next = prev.map((segment) => {
+        const start = Math.min(
+          segment.start_time_sec,
+          Math.max(0, finalDuration - 0.5),
+        )
+        const end = Math.min(segment.end_time_sec, finalDuration)
+        if (
+          start === segment.start_time_sec &&
+          end === segment.end_time_sec &&
+          segment.duration_sec === Math.max(0, end - start)
+        ) {
+          return segment
+        }
+        changed = true
+        return {
+          ...segment,
+          start_time_sec: start,
+          end_time_sec: end,
+          duration_sec: Math.max(0, end - start),
+        }
+      })
+      return changed ? next : prev
+    })
+  }, [finalDuration])
+
+  const setFinalDuration = (value: number | null) => {
+    setFinalDurationState(value)
+    setDurationError(null)
+    const nextConfig = { ...initialVideoConfig }
+    if (value === null) {
+      delete nextConfig.duration
+    } else {
+      nextConfig.duration = value
+    }
+    void updateContent({
+      id: content.id,
+      videoConfigurations: JSON.stringify(nextConfig),
+    }).catch((err) => {
+      setDurationError(
+        err instanceof Error ? err.message : 'Failed to save duration',
+      )
+    })
+  }
+
   const dirty = JSON.stringify(segments) !== baseline
 
   const updateTiming = (
@@ -218,8 +308,9 @@ export function ContentRenderer({ content }: ContentRendererProps) {
     field: 'start_time_sec' | 'end_time_sec',
     rawValue: string,
   ) => {
-    const value = Number(rawValue)
+    let value = Number(rawValue)
     if (Number.isNaN(value) || value < 0) return
+    if (totalLength > 0) value = Math.min(value, totalLength)
     setTimingsSaved(false)
     setSegments((prev) =>
       prev.map((segment) => {
@@ -227,11 +318,12 @@ export function ContentRenderer({ content }: ContentRendererProps) {
         const start =
           field === 'start_time_sec' ? value : segment.start_time_sec
         const end = field === 'end_time_sec' ? value : segment.end_time_sec
+        const safeEnd = Math.max(start, end)
         return {
           ...segment,
           start_time_sec: start,
-          end_time_sec: end,
-          duration_sec: Math.max(0, end - start),
+          end_time_sec: safeEnd,
+          duration_sec: Math.max(0, safeEnd - start),
         }
       }),
     )
@@ -258,15 +350,119 @@ export function ContentRenderer({ content }: ContentRendererProps) {
     setSegments(savedSegments)
     setTimingsSaved(false)
     setTimingsError(null)
+    setEditingSegmentId(null)
+  }
+
+  const addSegment = () => {
+    const text = newSegmentText.trim()
+    if (!text) return
+    const nextId =
+      segments.reduce((max, segment) => Math.max(max, segment.segment_id), 0) +
+      1
+    const lastEnd = segments.reduce(
+      (max, segment) => Math.max(max, segment.end_time_sec),
+      0,
+    )
+    const total = totalLength
+    const start = total ? Math.min(lastEnd, total) : lastEnd
+    const end = total
+      ? Math.max(start + 1, Math.min(start + 3, total))
+      : start + 3
+    const segment: OverlaySegment = {
+      segment_id: nextId,
+      text,
+      start_time_sec: start,
+      end_time_sec: end,
+      duration_sec: Math.max(0, end - start),
+      screen_position: 'Center',
+    }
+    setTimingsSaved(false)
+    setSegments((prev) =>
+      [...prev, segment].sort((a, b) => a.start_time_sec - b.start_time_sec),
+    )
+    setNewSegmentText('')
+  }
+
+  const removeSegment = (segmentId: number) => {
+    setTimingsSaved(false)
+    setEditingSegmentId((current) =>
+      current === segmentId ? null : current,
+    )
+    setSegments((prev) =>
+      prev.filter((segment) => segment.segment_id !== segmentId),
+    )
+  }
+
+  const updateSegmentText = (segmentId: number, text: string) => {
+    const next = text.trim()
+    setTimingsSaved(false)
+    setSegments((prev) =>
+      prev.map((segment) =>
+        segment.segment_id === segmentId && next
+          ? { ...segment, text: next }
+          : segment,
+      ),
+    )
+  }
+
+  const commitSegmentEdit = () => {
+    if (editingSegmentId === null) return
+    if (segmentEditText.trim()) updateSegmentText(editingSegmentId, segmentEditText)
+    setEditingSegmentId(null)
   }
 
   const keywords = useMemo(
     () =>
+      keywordList.filter((keyword): keyword is string => Boolean(keyword)),
+    [keywordList],
+  )
+
+  useEffect(() => {
+    setKeywordList(
       (content.videoKeywords ?? []).filter(
         (keyword): keyword is string => Boolean(keyword),
       ),
-    [content.videoKeywords],
-  )
+    )
+  }, [content.videoKeywords])
+
+  const persistKeywords = async (next: string[]) => {
+    setKeywordList(next)
+    try {
+      await updateContent({ id: content.id, videoKeywords: next })
+      setKeywordsError(null)
+    } catch (err) {
+      setKeywordsError(
+        err instanceof Error ? err.message : 'Failed to save keywords',
+      )
+    }
+  }
+
+  const addKeywords = () => {
+    const items = keywordInput
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    if (!items.length) return
+    void persistKeywords([...new Set([...keywords, ...items])])
+    setKeywordInput('')
+  }
+
+  const removeKeyword = (keyword: string) => {
+    void persistKeywords(keywords.filter((item) => item !== keyword))
+  }
+
+  const commitKeywordEdit = () => {
+    if (editingKeyword === null) return
+    const nextValue = editValue.trim()
+    if (!nextValue) {
+      removeKeyword(editingKeyword)
+    } else if (nextValue !== editingKeyword) {
+      void persistKeywords(
+        keywords.map((item) => (item === editingKeyword ? nextValue : item)),
+      )
+    }
+    setEditingKeyword(null)
+  }
 
   const musicQuery = useMemo(
     () => audioQuery(parseAudioConfig(content.audioConfig)),
@@ -280,7 +476,7 @@ export function ContentRenderer({ content }: ContentRendererProps) {
       setPlaying(false)
       setCurrentTime(0)
       setRenderedUrl(null)
-      setVideoHasAudio(null)
+      lastTimeRef.current = 0
       try {
         if (!keywords.length) {
           throw new Error('This content has no video keywords to search Pexels.')
@@ -315,11 +511,25 @@ export function ContentRenderer({ content }: ContentRendererProps) {
 
   const pick = results[resultIndex] ?? null
 
-  const resetPlayback = () => {
-    setPlaying(false)
-    setCurrentTime(0)
-    setRenderedUrl(null)
-    setVideoHasAudio(null)
+  const playbackLimit = () =>
+    finalDuration && finalDuration > 0
+      ? duration
+        ? Math.min(finalDuration, duration)
+        : finalDuration
+      : duration || null
+
+  const seekTo = (raw: number) => {
+    const video = videoRef.current
+    if (!video) return
+    const limit = playbackLimit()
+    const value = limit !== null ? Math.min(Math.max(0, raw), limit) : Math.max(0, raw)
+    setScrubbing(true)
+    setScrubValue(value)
+    video.currentTime = value
+    if (video.paused) {
+      lastTimeRef.current = value
+      setCurrentTime(value)
+    }
   }
 
   /** Jumps to the next keyword every click, cycling all of them. */
@@ -330,40 +540,36 @@ export function ContentRenderer({ content }: ContentRendererProps) {
     void loadKeyword(nextIndex, nextPage)
   }
 
-  /** Another clip for the current keyword, paging Pexels when exhausted. */
-  const nextClip = () => {
-    if (resultIndex + 1 < results.length) {
-      setResultIndex(resultIndex + 1)
-      resetPlayback()
-      return
-    }
-    void loadKeyword(keywordIndex, page + 1)
-  }
-
-  const loadTracks = useCallback(async () => {
-    setTrackLoading(true)
-    setTrackError(null)
-    try {
-      if (!musicQuery) {
-        throw new Error(
-          'This content has no audio config to search music for.',
+  const loadTracks = useCallback(
+    async (nextPage = 1) => {
+      setTrackLoading(true)
+      setTrackError(null)
+      try {
+        if (!musicQuery) {
+          throw new Error(
+            'This content has no audio config to search music for.',
+          )
+        }
+        const found = await searchTracks(musicQuery, 10, nextPage)
+        setTracks(found)
+        setTrackIndex(0)
+        setMusicPage(nextPage)
+        if (!found.length) {
+          setTrackError(
+            `No tracks found for "${musicQuery}" (page ${nextPage}).`,
+          )
+        }
+      } catch (err) {
+        setTracks([])
+        setTrackError(
+          err instanceof Error ? err.message : 'Failed to load music',
         )
+      } finally {
+        setTrackLoading(false)
       }
-      const found = await searchTracks(musicQuery)
-      setTracks(found)
-      setTrackIndex(0)
-      if (!found.length) {
-        setTrackError(`No tracks found for "${musicQuery}".`)
-      }
-    } catch (err) {
-      setTracks([])
-      setTrackError(
-        err instanceof Error ? err.message : 'Failed to load music',
-      )
-    } finally {
-      setTrackLoading(false)
-    }
-  }, [musicQuery])
+    },
+    [musicQuery],
+  )
 
   useEffect(() => {
     void loadTracks()
@@ -371,67 +577,85 @@ export function ContentRenderer({ content }: ContentRendererProps) {
 
   const track = tracks[trackIndex] ?? null
 
+  /** Next loaded track; once wrapped, fetches the next Jamendo page. */
   const nextTrack = () => {
     if (!tracks.length) {
       void loadTracks()
       return
     }
-    setTrackIndex((trackIndex + 1) % tracks.length)
+    if (trackIndex + 1 < tracks.length) {
+      setTrackIndex(trackIndex + 1)
+      return
+    }
+    void loadTracks(musicPage + 1)
   }
+
+  const lastTimeRef = useRef(0)
 
   useEffect(() => {
     if (!playing) return
     let frame = 0
     const tick = () => {
       const video = videoRef.current
-      if (video) setCurrentTime(video.currentTime)
+      if (video) {
+        const limit = finalDuration && finalDuration > 0 ? finalDuration : null
+        const time = video.currentTime
+        if (limit !== null && time >= limit) {
+          video.pause()
+          video.currentTime = limit
+          audioRef.current?.pause()
+          lastTimeRef.current = limit
+          setCurrentTime(limit)
+          setScrubbing(false)
+          setScrubValue(null)
+          frame = 0
+          return
+        }
+        if (Math.abs(time - lastTimeRef.current) >= 0.1) {
+          lastTimeRef.current = time
+          setCurrentTime(time)
+        }
+      }
       frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
-  }, [playing])
+  }, [playing, finalDuration])
 
   /**
-   * Builds a Web Audio graph once so the source video and the music track can
-   * be mixed with independent volumes and captured into one recordable track.
-   * Returns null when the browser refuses (e.g. a non-CORS media source).
+   * Builds a Web Audio graph once so only the music track is mixed and
+   * captured into a recordable track. The source video plays as a silent
+   * background visual. Returns null when the browser refuses (e.g. a
+   * non-CORS media source).
    */
   const ensureAudioGraph = useCallback((): AudioGraph | null => {
     if (audioGraphRef.current) return audioGraphRef.current
-    const video = videoRef.current
     const audio = audioRef.current
-    if (!video || !audio) return null
+    if (!audio) return null
     try {
       const ctx = new AudioContext()
-      const videoGain = ctx.createGain()
       const musicGain = ctx.createGain()
-      ctx.createMediaElementSource(video).connect(videoGain)
       ctx.createMediaElementSource(audio).connect(musicGain)
-      videoGain.connect(ctx.destination)
       musicGain.connect(ctx.destination)
       const destination = ctx.createMediaStreamDestination()
-      videoGain.connect(destination)
       musicGain.connect(destination)
-      videoGain.gain.value = videoVolume
       musicGain.gain.value = musicVolume
-      const graph: AudioGraph = { ctx, videoGain, musicGain, destination }
+      const graph: AudioGraph = { ctx, musicGain, destination }
       audioGraphRef.current = graph
       return graph
     } catch {
       return null
     }
-  }, [musicVolume, videoVolume])
+  }, [musicVolume])
 
   useEffect(() => {
     const graph = audioGraphRef.current
     if (graph) {
-      graph.videoGain.gain.value = videoVolume
       graph.musicGain.gain.value = musicVolume
       return
     }
-    if (videoRef.current) videoRef.current.volume = videoVolume
     if (audioRef.current) audioRef.current.volume = musicVolume
-  }, [videoVolume, musicVolume])
+  }, [musicVolume])
 
   const togglePlay = () => {
     const video = videoRef.current
@@ -442,6 +666,12 @@ export function ContentRenderer({ content }: ContentRendererProps) {
       void graph.ctx.resume()
     }
     if (video.paused) {
+      const limit = playbackLimit()
+      if (limit !== null && video.currentTime >= limit) {
+        video.currentTime = 0
+        lastTimeRef.current = 0
+        setCurrentTime(0)
+      }
       if (audio && track) {
         audio.currentTime = 0
         void audio.play()
@@ -507,38 +737,39 @@ export function ContentRenderer({ content }: ContentRendererProps) {
     recorder.ondataavailable = (event) => {
       if (event.data.size) chunks.push(event.data)
     }
-    const stopped = new Promise<Blob>((resolve) => {
-      recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }))
-    })
 
-    const draw = () => {
+    const total = finalDuration && finalDuration > 0 ? finalDuration : duration
+    if (!total || total <= 0) {
+      setRendering(false)
+      setRenderError('No usable duration. Load the video or set a final duration.')
+      return
+    }
+
+    const draw = (atTime: number) => {
       if (!videoRef.current) return
       ctx.clearRect(0, 0, width, height)
       ctx.fillStyle = '#030303'
       ctx.fillRect(0, 0, width, height)
       drawCover(ctx, videoRef.current, width, height)
-      const segment = segmentAt(segments, videoRef.current.currentTime)
+      const segment = segmentAt(segments, atTime)
       if (segment) drawOverlay(ctx, segment, width, height)
     }
 
     let frame = 0
-    const loop = () => {
-      draw()
-      if (videoRef.current) {
-        setRenderProgress(
-          videoRef.current.duration
-            ? videoRef.current.currentTime / videoRef.current.duration
-            : 0,
-        )
+    const startTime = performance.now()
+    const renderLoop = () => {
+      const elapsed = (performance.now() - startTime) / 1000
+      if (elapsed >= total) {
+        cancelAnimationFrame(frame)
+        draw(total)
+        audioRef.current?.pause()
+        if (videoRef.current) videoRef.current.pause()
+        if (recorder.state !== 'inactive') recorder.stop()
+        return
       }
-      frame = requestAnimationFrame(loop)
-    }
-
-    const onEnded = () => {
-      cancelAnimationFrame(frame)
-      draw()
-      audioRef.current?.pause()
-      if (recorder.state !== 'inactive') recorder.stop()
+      draw(elapsed)
+      setRenderProgress(elapsed / total)
+      frame = requestAnimationFrame(renderLoop)
     }
 
     try {
@@ -548,17 +779,16 @@ export function ContentRenderer({ content }: ContentRendererProps) {
       if (audio) {
         audio.pause()
         audio.currentTime = 0
+        audio.loop = true
       }
-      video.addEventListener('ended', onEnded, { once: true })
       await video.play()
       if (audio && track) void audio.play()
       recorder.start(100)
-      loop()
+      renderLoop()
 
-      await new Promise<void>((resolve) => {
-        video.addEventListener('ended', () => resolve(), { once: true })
+      const blob = await new Promise<Blob>((resolve) => {
+        recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }))
       })
-      const blob = await stopped
       const url = URL.createObjectURL(blob)
       setRenderedUrl(url)
       const anchor = document.createElement('a')
@@ -576,17 +806,38 @@ export function ContentRenderer({ content }: ContentRendererProps) {
           : 'Failed to render the video.',
       )
     } finally {
+      if (audioRef.current) audioRef.current.loop = false
       setRendering(false)
     }
-  }, [content.title, ensureAudioGraph, segments, track])
+  }, [content.title, duration, ensureAudioGraph, finalDuration, segments, track])
 
-  const activeSegment = segmentAt(segments, currentTime)
-  const progress = duration ? Math.min(currentTime / duration, 1) : 0
+  useImperativeHandle(
+    ref,
+    () => ({
+      render: () => {
+        void renderWithOverlays()
+      },
+    }),
+    [renderWithOverlays],
+  )
+
+  useEffect(() => {
+    onRenderState?.({ canRender: Boolean(pick) && !rendering, rendering })
+  }, [onRenderState, pick, rendering])
+
+  const overlayTime =
+    finalDuration && finalDuration > 0
+      ? Math.min(currentTime, finalDuration)
+      : currentTime
+  const activeSegment = segmentAt(segments, overlayTime)
+  const displayTime = scrubbing && scrubValue !== null ? scrubValue : currentTime
 
   return (
-    <div className="grid gap-10 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-      <div>
-        <div className="relative aspect-9/16 w-full overflow-hidden rounded-lg border border-hairline bg-ink">
+    <div className="flex flex-col gap-8 lg:h-[calc(100dvh-9rem)] lg:flex-row-reverse lg:gap-8 lg:overflow-hidden">
+      <div className="flex w-full flex-col lg:w-[420px] lg:shrink-0">
+        <div
+          className="relative mx-auto aspect-9/16 w-full overflow-hidden rounded-lg border border-hairline bg-ink [container-type:size]"
+          style={{ width: 'min(420px, calc((100dvh - 16rem) * 9 / 16))' }}>
           {pick ? (
             <>
               <video
@@ -594,12 +845,10 @@ export function ContentRenderer({ content }: ContentRendererProps) {
                 src={pick.file.link}
                 poster={pick.video.image}
                 crossOrigin="anonymous"
+                muted
                 playsInline
                 className="size-full object-cover"
-                onLoadedMetadata={(e) => {
-                  setDuration(e.currentTarget.duration)
-                  setVideoHasAudio(detectVideoAudio(e.currentTarget))
-                }}
+                onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
                 onPlay={() => setPlaying(true)}
                 onPause={() => setPlaying(false)}
                 onEnded={() => {
@@ -608,18 +857,18 @@ export function ContentRenderer({ content }: ContentRendererProps) {
                 }}
               />
               {activeSegment ? (
-                <div className="pointer-events-none absolute inset-0 flex justify-center p-6">
+                <div className="pointer-events-none absolute inset-0 flex justify-center p-[6cqw]">
                   <p
                     className={
                       activeSegment.screen_position
                         .toLowerCase()
                         .includes('top')
-                        ? 'self-start max-w-[85%] rounded-md bg-[rgba(3,3,3,0.55)] px-5 py-3 text-center text-xl leading-snug font-semibold text-white'
+                        ? 'self-start w-fit max-w-[85cqw] rounded-md bg-[rgba(3,3,3,0.55)] px-[4.125cqw] py-[3.025cqw] text-center text-[5.5cqw] leading-[7.04cqw] font-semibold text-white'
                         : activeSegment.screen_position
                               .toLowerCase()
                               .includes('bottom')
-                          ? 'self-end max-w-[85%] rounded-md bg-[rgba(3,3,3,0.55)] px-5 py-3 text-center text-xl leading-snug font-semibold text-white'
-                          : 'self-center max-w-[85%] rounded-md bg-[rgba(3,3,3,0.55)] px-5 py-3 text-center text-xl leading-snug font-semibold text-white'
+                          ? 'self-end w-fit max-w-[85cqw] rounded-md bg-[rgba(3,3,3,0.55)] px-[4.125cqw] py-[3.025cqw] text-center text-[5.5cqw] leading-[7.04cqw] font-semibold text-white'
+                          : 'self-center w-fit max-w-[85cqw] rounded-md bg-[rgba(3,3,3,0.55)] px-[4.125cqw] py-[3.025cqw] text-center text-[5.5cqw] leading-[7.04cqw] font-semibold text-white'
                     }
                   >
                     {activeSegment.text}
@@ -646,67 +895,99 @@ export function ContentRenderer({ content }: ContentRendererProps) {
           crossOrigin="anonymous"
           preload="auto"
           className="hidden"
+          onError={() => {
+            setTrackError('This track could not be loaded — fetching another.')
+            if (track) nextTrack()
+            else void loadTracks()
+          }}
         />
 
-        <div className="mt-4 flex items-center gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={togglePlay}
-            disabled={!pick}
-            className="rounded-full"
-          >
-            {playing ? <Pause /> : <Play />}
-            {playing ? 'Pause' : 'Play'}
-          </Button>
-          <Button
-            type="button"
-            onClick={() => void renderWithOverlays()}
-            disabled={!pick || rendering}
-            className="rounded-full"
-          >
-            {rendering ? <Loader2 className="animate-spin" /> : <Download />}
-            {rendering ? 'Rendering…' : 'Render & download'}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={nextVideo}
-            disabled={loading || !keywords.length}
-            className="rounded-full"
-          >
-            <RefreshCw /> New video
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={nextClip}
-            disabled={loading || !pick}
-            className="rounded-full"
-          >
-            <Shuffle /> Another clip
-          </Button>
-        </div>
-
-        {keywords.length ? (
-          <p className="mt-3 text-xs text-slate">
-            Keyword {keywordIndex + 1}/{keywords.length} ·{' '}
-            <span className="text-graphite">"{keywords[keywordIndex]}"</span>
-            {page > 1 ? ` · page ${page}` : ''}
-          </p>
-        ) : null}
-
         {duration ? (
-          <div className="mt-4">
-            <div className="h-1 w-full overflow-hidden rounded-full bg-hairline">
-              <div
-                className="h-full bg-ink transition-[width] duration-100"
-                style={{ width: `${progress * 100}%` }}
+          <div className="mt-3">
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={togglePlay}
+                disabled={!pick}
+                aria-label={playing ? 'Pause' : 'Play'}
+                className="size-8 shrink-0 rounded-full"
+              >
+                {playing ? <Pause /> : <Play />}
+              </Button>
+              <input
+                type="range"
+                min={0}
+                max={(finalDuration ?? duration).toFixed(1)}
+                step={0.01}
+                value={displayTime}
+                onInput={(e) => seekTo(Number(e.currentTarget.value))}
+                onPointerUp={() => setScrubbing(false)}
+                onKeyUp={() => setScrubbing(false)}
+                className="w-full cursor-pointer accent-ink"
+                aria-label="Seek through the video"
               />
+              <p className="w-16 shrink-0 text-right text-xs text-slate">
+                {displayTime.toFixed(1)}s{' '}
+                <span className="text-graphite">
+                  /{(finalDuration ?? duration).toFixed(1)}s
+                </span>
+              </p>
             </div>
-            <p className="mt-2 text-xs text-slate">
-              {currentTime.toFixed(1)}s / {duration.toFixed(1)}s
-            </p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate">
+              <label className="flex items-center gap-1.5">
+                Final duration
+                <input
+                  type="number"
+                  min={0.5}
+                  max={20}
+                  step={0.5}
+                  value={finalDuration ?? ''}
+                  placeholder={duration ? String(duration.toFixed(1)) : ''}
+                  onChange={(e) =>
+                    setFinalDuration(
+                      e.target.value === ''
+                        ? null
+                        : Math.min(20, Math.max(0.5, Number(e.target.value))),
+                    )
+                  }
+                  className="w-16 rounded-md border border-hairline bg-canvas px-2 py-0.5 text-sm text-ink outline-none focus:border-ink"
+                />
+                s
+              </label>
+              <span className="flex items-center gap-1">
+                {VIDEO_LENGTH_PRESETS.map((seconds) => (
+                  <button
+                    key={seconds}
+                    type="button"
+                    onClick={() => setFinalDuration(seconds)}
+                    className={
+                      finalDuration === seconds
+                        ? 'rounded-full bg-ink px-2.5 py-0.5 text-[11px] font-medium text-white'
+                        : 'rounded-full border border-hairline px-2.5 py-0.5 text-[11px] text-graphite transition-colors hover:border-ink hover:text-ink'
+                    }
+                  >
+                    {seconds}s
+                  </button>
+                ))}
+              </span>
+              {finalDuration !== null ? (
+                <span className="truncate text-graphite">
+                  · text stops after {finalDuration.toFixed(1)}s
+                  <button
+                    type="button"
+                    onClick={() => setFinalDuration(null)}
+                    className="ml-1 underline underline-offset-2 hover:text-ink"
+                  >
+                    use video
+                  </button>
+                </span>
+              ) : null}
+              {durationError ? (
+                <span className="text-ink">{durationError}</span>
+              ) : null}
+            </div>
           </div>
         ) : null}
 
@@ -733,22 +1014,26 @@ export function ContentRenderer({ content }: ContentRendererProps) {
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-8">
-        <div>
+      <div className="flex min-w-0 flex-1 flex-col gap-5 lg:overflow-hidden">
+        <div className="flex items-baseline justify-between gap-4">
           <p className="eyebrow text-slate">preview</p>
-          <h2 className="text-heading-sm mt-4">{content.title}</h2>
+          <h2 className="text-heading-sm line-clamp-1">
+            {content.title}
+          </h2>
         </div>
 
-        <div>
-          <p className="micro-caps text-slate">Caption</p>
-          <p className="mt-3 text-base leading-relaxed whitespace-pre-wrap text-graphite">
-            {content.caption ?? 'No caption.'}
-          </p>
-        </div>
+        {content.caption ? (
+          <div>
+            <p className="micro-caps text-slate">Caption</p>
+            <p className="mt-1 line-clamp-2 text-sm leading-relaxed whitespace-pre-wrap text-graphite">
+              {content.caption}
+            </p>
+          </div>
+        ) : null}
 
         <div>
           <p className="micro-caps text-slate">Hashtags</p>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-1 flex flex-wrap gap-1.5">
             {content.hashtags?.filter((tag): tag is string => Boolean(tag))
               .length ? (
               content.hashtags
@@ -765,6 +1050,102 @@ export function ContentRenderer({ content }: ContentRendererProps) {
               <p className="text-sm text-graphite">No hashtags.</p>
             )}
           </div>
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <p className="micro-caps text-slate">Video keywords</p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={nextVideo}
+              disabled={loading || !keywords.length}
+              className="h-8 rounded-full px-4 text-xs"
+            >
+              <RefreshCw /> New video
+            </Button>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {keywords.length ? (
+              keywords.map((keyword) =>
+                editingKeyword === keyword ? (
+                  <Input
+                    key={keyword}
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={commitKeywordEdit}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitKeywordEdit()
+                      if (e.key === 'Escape') setEditingKeyword(null)
+                    }}
+                    className="h-7 w-32 rounded-full border-hairline-soft px-2 text-xs"
+                  />
+                ) : (
+                  <span
+                    key={keyword}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-hairline px-2 py-0.5 text-xs text-graphite"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingKeyword(keyword)
+                        setEditValue(keyword)
+                      }}
+                      title="Edit keyword"
+                      className="transition-colors hover:text-ink"
+                    >
+                      {keyword}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeKeyword(keyword)}
+                      aria-label={`Remove ${keyword}`}
+                      className="text-slate transition-colors hover:text-ink"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ),
+              )
+            ) : (
+              <p className="text-sm text-graphite">No keywords yet.</p>
+            )}
+          </div>
+          <div className="mt-2 flex gap-2">
+            <Input
+              value={keywordInput}
+              onChange={(e) => setKeywordInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  addKeywords()
+                }
+              }}
+              placeholder="Add keyword (comma separated)"
+              className="h-8 rounded-md border-hairline-soft px-2 text-sm"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={addKeywords}
+              className="h-8 rounded-full px-4 text-xs"
+            >
+              Add
+            </Button>
+          </div>
+          {keywordsError ? (
+            <p className="mt-2 text-xs text-slate">{keywordsError}</p>
+          ) : null}
+          {keywordIndex > 0 ? (
+            <p className="mt-2 text-xs text-slate">
+              Keyword {keywordIndex + 1}/{keywords.length} ·{' '}
+              <span className="text-graphite">
+                "{keywords[keywordIndex % keywords.length]}"
+              </span>
+              {page > 1 ? ` · page ${page}` : ''}
+            </p>
+          ) : null}
         </div>
 
         <div>
@@ -790,7 +1171,7 @@ export function ContentRenderer({ content }: ContentRendererProps) {
                   disabled={!dirty || savingTimings}
                   className="h-8 rounded-full px-4 text-xs"
                 >
-                  {savingTimings ? 'Saving…' : 'Save timings'}
+                  {savingTimings ? 'Saving…' : 'Save timeline'}
                 </Button>
               </div>
             ) : null}
@@ -802,76 +1183,102 @@ export function ContentRenderer({ content }: ContentRendererProps) {
             </p>
           ) : null}
 
-          <ul className="mt-3 flex flex-col gap-2">
+          <ul className="mt-2 flex flex-col gap-1.5">
             {segments.length ? (
               segments.map((segment, index) => (
                 <li
                   key={segment.segment_id}
-                  className="rounded-md border border-hairline px-4 py-3 text-sm text-graphite"
+                  className="flex items-center gap-2 rounded-md border border-hairline px-3 py-2 text-sm text-graphite"
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="micro-caps text-slate">
-                      Segment {index + 1}
-                    </span>
-                    <span className="text-xs text-slate">
-                      {segment.screen_position}
-                    </span>
-                  </div>
-                  <span className="mt-2 block text-ink">{segment.text}</span>
-                  <div className="mt-3 flex items-end gap-3">
-                    <label className="flex flex-col gap-1">
-                      <span className="text-xs text-slate">Start (s)</span>
-                      <Input
-                        type="number"
-                        min={0}
-                        step={0.1}
-                        value={segment.start_time_sec}
-                        onChange={(e) =>
-                          updateTiming(
-                            segment.segment_id,
-                            'start_time_sec',
-                            e.target.value,
-                          )
-                        }
-                        className="h-9 w-24 rounded-md border-hairline-soft"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-xs text-slate">End (s)</span>
-                      <Input
-                        type="number"
-                        min={0}
-                        step={0.1}
-                        value={segment.end_time_sec}
-                        onChange={(e) =>
-                          updateTiming(
-                            segment.segment_id,
-                            'end_time_sec',
-                            e.target.value,
-                          )
-                        }
-                        className="h-9 w-24 rounded-md border-hairline-soft"
-                      />
-                    </label>
-                    <span className="pb-2 text-xs text-slate">
-                      {segment.duration_sec.toFixed(1)}s
-                    </span>
-                    {duration ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateTiming(
-                            segment.segment_id,
-                            'end_time_sec',
-                            String(duration),
-                          )
-                        }
-                        className="pb-2 text-xs text-graphite underline underline-offset-2 hover:text-ink"
-                      >
-                        to end
-                      </button>
-                    ) : null}
-                  </div>
+                  {editingSegmentId === segment.segment_id ? (
+                    <Input
+                      value={segmentEditText}
+                      onChange={(e) => setSegmentEditText(e.target.value)}
+                      onBlur={commitSegmentEdit}
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitSegmentEdit()
+                        if (e.key === 'Escape') setEditingSegmentId(null)
+                      }}
+                      aria-label={`Edit overlay text ${index + 1}`}
+                      className="h-7 min-w-0 flex-1 border-hairline-soft px-2 text-xs text-ink"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingSegmentId(segment.segment_id)
+                        setSegmentEditText(segment.text)
+                      }}
+                      title="Edit text"
+                      className="min-w-0 flex-1 truncate text-left text-ink transition-colors hover:text-graphite"
+                    >
+                      {segment.text}
+                    </button>
+                  )}
+                  <span className="shrink-0 text-[10px] text-slate">
+                    {segment.screen_position}
+                  </span>
+                  <label className="flex shrink-0 items-center gap-1">
+                    <span className="text-[10px] text-slate">Start</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={Number(segment.start_time_sec.toFixed(2))}
+                      onChange={(e) =>
+                        updateTiming(
+                          segment.segment_id,
+                          'start_time_sec',
+                          e.target.value,
+                        )
+                      }
+                      className="h-7 w-14 rounded-md border-hairline-soft px-2 text-xs"
+                    />
+                  </label>
+                  <label className="flex shrink-0 items-center gap-1">
+                    <span className="text-[10px] text-slate">End</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={Number(segment.end_time_sec.toFixed(2))}
+                      onChange={(e) =>
+                        updateTiming(
+                          segment.segment_id,
+                          'end_time_sec',
+                          e.target.value,
+                        )
+                      }
+                      className="h-7 w-14 rounded-md border-hairline-soft px-2 text-xs"
+                    />
+                  </label>
+                  <span className="w-10 shrink-0 text-xs text-slate">
+                    {segment.duration_sec.toFixed(1)}s
+                  </span>
+                  {finalDuration ?? duration ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateTiming(
+                          segment.segment_id,
+                          'end_time_sec',
+                          String(finalDuration ?? duration),
+                        )
+                      }
+                      className="shrink-0 text-xs text-graphite underline underline-offset-2 hover:text-ink"
+                    >
+                      to end
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => removeSegment(segment.segment_id)}
+                    aria-label={`Remove overlay text ${index + 1}`}
+                    className="shrink-0 text-slate transition-colors hover:text-ink"
+                  >
+                    <X className="size-3.5" />
+                  </button>
                 </li>
               ))
             ) : (
@@ -880,6 +1287,36 @@ export function ContentRenderer({ content }: ContentRendererProps) {
               </li>
             )}
           </ul>
+
+          <div className="mt-2 flex gap-2">
+            <Input
+              value={newSegmentText}
+              onChange={(e) => setNewSegmentText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  addSegment()
+                }
+              }}
+              placeholder="Add overlay text"
+              aria-label="New overlay text"
+              className="h-8 rounded-md border-hairline-soft px-2 text-sm"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={addSegment}
+              disabled={!newSegmentText.trim()}
+              className="h-8 rounded-full px-4 text-xs"
+            >
+              Add text
+            </Button>
+          </div>
+          {dirty ? (
+            <p className="mt-2 text-xs text-slate">
+              Unsaved timeline changes.
+            </p>
+          ) : null}
         </div>
 
         <div>
@@ -932,32 +1369,14 @@ export function ContentRenderer({ content }: ContentRendererProps) {
           ) : null}
 
           {musicQuery ? (
-            <p className="mt-2 text-xs text-slate">
-              Query: {musicQuery} · mixed with the source audio
-            </p>
+            <p className="mt-2 text-xs text-slate">Query: {musicQuery}</p>
           ) : (
             <p className="mt-2 text-xs text-slate">
               No audio config saved for this content.
             </p>
           )}
 
-          <div className="mt-4 flex flex-col gap-4">
-            <label className="flex flex-col gap-2">
-              <span className="flex items-center justify-between text-xs text-slate">
-                <span>Video volume</span>
-                <span>{Math.round(videoVolume * 100)}%</span>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={videoVolume}
-                disabled={videoHasAudio === false}
-                onChange={(e) => setVideoVolume(Number(e.target.value))}
-                className="w-full cursor-pointer accent-ink disabled:cursor-not-allowed disabled:opacity-40"
-              />
-            </label>
+          <div className="mt-4">
             <label className="flex flex-col gap-2">
               <span className="flex items-center justify-between text-xs text-slate">
                 <span>Music volume</span>
@@ -973,12 +1392,6 @@ export function ContentRenderer({ content }: ContentRendererProps) {
                 className="w-full cursor-pointer accent-ink"
               />
             </label>
-            {videoHasAudio === false ? (
-              <p className="text-xs text-slate">
-                This clip has no audio track — Pexels stock videos are silent.
-                Use the music track instead.
-              </p>
-            ) : null}
           </div>
         </div>
 
@@ -994,7 +1407,9 @@ export function ContentRenderer({ content }: ContentRendererProps) {
               {pick.video.user.name}
             </a>{' '}
             on Pexels · {pick.file.width}×{pick.file.height}
-            {keywords[keywordIndex] ? ` · "${keywords[keywordIndex]}"` : ''}
+            {keywords.length
+              ? ` · "${keywords[keywordIndex % keywords.length]}"`
+              : ''}
           </p>        ) : null}
       </div>
 

@@ -40,6 +40,7 @@ export function hasMusicKey(): boolean {
 export async function searchTracks(
   query: string,
   limit = 10,
+  page = 1,
 ): Promise<MusicTrack[]> {
   if (!JAMENDO_CLIENT_ID) {
     throw new Error(
@@ -59,6 +60,7 @@ export async function searchTracks(
     search,
     audioformat: 'mp32',
     include: 'musicinfo',
+    page: String(page),
   })
 
   const response = await fetch(`${JAMENDO_SEARCH_URL}?${params.toString()}`)

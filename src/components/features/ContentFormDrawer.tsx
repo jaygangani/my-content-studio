@@ -93,9 +93,9 @@ function parseListText(value: string): string[] | undefined {
   return items.length ? items : undefined
 }
 
-function parseJsonText(value: string, label: string): string | undefined {
+function parseJsonText(value: string, label: string): string | null | undefined {
   const trimmed = value.trim()
-  if (!trimmed) return undefined
+  if (!trimmed) return null
   try {
     return JSON.stringify(JSON.parse(trimmed))
   } catch {
@@ -165,8 +165,8 @@ export function ContentFormDrawer({
         videoConfigurations: parseJsonText(
           form.videoConfigurations,
           'Video configurations',
-        ),
-        audioConfig: parseJsonText(form.audioConfig, 'Audio config'),
+        ) ?? undefined,
+        audioConfig: parseJsonText(form.audioConfig, 'Audio config') ?? undefined,
       }
 
       if (content) {
@@ -342,7 +342,7 @@ export function ContentFormDrawer({
               id="content-overlay"
               value={form.overlayText}
               onChange={(e) => setField('overlayText', e.target.value)}
-              placeholder='{ "headline": "..." }'
+              placeholder='{ "overlay_text_timeline": [{ "text": "...", "start_time_sec": 0, "end_time_sec": 3, "duration_sec": 3, "screen_position": "Center" }] }'
               className="min-h-24 rounded-md border-hairline-soft font-mono text-xs"
             />
           </div>
