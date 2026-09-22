@@ -1,4 +1,5 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
+import { generateContentFn } from '../functions/generate-content/resource';
 
 const ContentStatus = a.enum([
   'DRAFT',
@@ -23,6 +24,7 @@ const schema = a.schema({
       name: a.string().required(),
       logo: a.string(),
       description: a.string(),
+      context: a.string(),
       contents: a.hasMany('Content', 'appId'),
     })
     .authorization((allow) => [allow.authenticated()]),
@@ -46,7 +48,8 @@ const schema = a.schema({
       type: ContentType,
     })
     .authorization((allow) => [allow.authenticated()]),
-});
+})
+.authorization((allow) => [allow.resource(generateContentFn)]);
 
 export type Schema = ClientSchema<typeof schema>;
 

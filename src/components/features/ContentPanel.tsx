@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { MoreVertical, Plus } from 'lucide-react'
+import { MoreVertical, Plus, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import {
   Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+  CardContent,
 } from '@/components/ui/card'
 import {
   DropdownMenu,
@@ -26,6 +24,7 @@ import { ContentFormDrawer } from '@/components/features/ContentFormDrawer'
 import {
   deleteContent,
   formatEnum,
+  generateContentDraft,
   listContentByApp,
 } from '@/services/content'
 import type { ContentItem } from '@/services/content'
@@ -52,6 +51,8 @@ export function ContentPanel({ appId }: ContentPanelProps) {
   const [error, setError] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState<ContentItem | null>(null)
+  const [generating, setGenerating] = useState(false)
+  const [generateError, setGenerateError] = useState<string | null>(null)
 
   const loadContent = useCallback(async () => {
     setError(null)
@@ -97,6 +98,21 @@ export function ContentPanel({ appId }: ContentPanelProps) {
     }
   }
 
+  const handleGenerate = async () => {
+    setGenerating(true)
+    setGenerateError(null)
+    try {
+      await generateContentDraft({ appId })
+      await loadContent()
+    } catch (err) {
+      setGenerateError(
+        err instanceof Error ? err.message : 'Failed to generate content',
+      )
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   return (
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -108,10 +124,26 @@ export function ContentPanel({ appId }: ContentPanelProps) {
             from the drawer.
           </p>
         </div>
-        <Button onClick={openCreate} className="h-10 rounded-full px-5">
-          <Plus /> New content
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={() => void handleGenerate()}
+            disabled={generating}
+            className="h-10 rounded-full px-5"
+          >
+            <Sparkles /> {generating ? 'Generating…' : 'Generate with AI'}
+          </Button>
+          <Button onClick={openCreate} className="h-10 rounded-full px-5">
+            <Plus /> New content
+          </Button>
+        </div>
       </div>
+
+      {generateError ? (
+        <p className="mt-6 rounded-lg border border-hairline-soft bg-hairline/60 px-4 py-3 text-sm text-ink">
+          {generateError}
+        </p>
+      ) : null}
 
       {error ? (
         <p className="mt-6 rounded-lg border border-hairline-soft bg-hairline/60 px-4 py-3 text-sm text-ink">
@@ -122,13 +154,30 @@ export function ContentPanel({ appId }: ContentPanelProps) {
       {loading ? (
         <p className="mt-10 text-sm text-slate">Loading…</p>
       ) : items.length === 0 ? (
-        <Card className="mt-10 rounded-lg border-hairline bg-canvas p-0 shadow-none">
-          <CardHeader className="px-8 pt-8">
-            <CardTitle className="text-heading-sm">No content yet</CardTitle>
-            <CardDescription className="text-base text-graphite">
-              Create your first content item for this app.
-            </CardDescription>
-          </CardHeader>
+        <Card className="mx-auto mt-10 w-full max-w-xl rounded-lg border-hairline bg-canvas p-0 shadow-none">
+          <CardContent className="flex flex-col items-center px-8 py-16 text-center">
+            <span className="flex size-12 items-center justify-center rounded-full border border-hairline">
+              <Sparkles className="size-5 text-slate" />
+            </span>
+            <h3 className="text-heading-md mt-6">No content yet</h3>
+            <p className="mt-3 max-w-sm text-base leading-relaxed text-graphite">
+              Draft your first piece with AI or start from a blank item.
+              Everything you publish for this app lives here.
+            </p>
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+              <Button
+                variant="outline"
+                onClick={() => void handleGenerate()}
+                disabled={generating}
+                className="h-10 rounded-full px-5"
+              >
+                <Sparkles /> {generating ? 'Generating…' : 'Generate with AI'}
+              </Button>
+              <Button onClick={openCreate} className="h-10 rounded-full px-5">
+                <Plus /> New content
+              </Button>
+            </div>
+          </CardContent>
         </Card>
       ) : (
         <Card className="mt-10 overflow-hidden rounded-lg border-hairline bg-canvas p-0 shadow-none">

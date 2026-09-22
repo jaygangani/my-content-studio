@@ -97,8 +97,25 @@ src/
   Unauthenticated redirects pass `state.from`; `LoginPage` returns there.
 - **Amplify** — `src/lib/amplify.ts` runs `Amplify.configure(amplify_outputs.json)`
   and exports the typed `dataClient`. Backend is defined in `amplify/`
-  (`auth`, `data` with the `Apps` model, `storage` `media/*`).
-  `amplify_outputs.json` is generated/refreshed only by deploy/sandbox.
+  (`auth`, `data` with the `Apps`/`Content` models, `storage` `media/*`,
+  function `generate-content`). `amplify_outputs.json` is generated/refreshed
+  only by deploy/sandbox.
+- **AI draft generation (Lambda + HTTP API)** — function
+  `amplify/functions/generate-content/` (in `defineBackend`, **not** AppSync).
+  Exposed as **`POST /content/generate`** on an API Gateway **HTTP API** with
+  **Cognito User Pool JWT authorizer** (authenticated/logged-in users only;
+  Bearer access token required). Endpoint base URL is written to
+  `amplify_outputs.json` → `custom.GENERATE_CONTENT_API_URL`. Frontend:
+  `generateContentDraft()` in `src/services/content.ts` (uses
+  `fetchAuthSession()`). `SYSTEM_PROMPT` and `USER_PROMPT` are constants in
+  the Lambda; the system prompt is extended with the app's `context` field
+  (Apps model, set in App Configurations) as reference. **API key from SSM**
+  param `OPENAI_API_KEY_PARAM`
+  (default `/mycontentstudio/openai/api-key`); model is function env
+  `OPENAI_MODEL` (default `gpt-4o-mini` — not in SSM). Lambda has
+  `ssm:GetParameter` (granted in `amplify/backend.ts`). Creates a row on
+  existing `Content` with `status: DRAFT`. Create the SSM parameter before
+  running it. No deploy without user ask.
 - **Hosting** — `amplify.yml` (repo root) is the **Amplify Hosting** build
   spec: `npm ci` → `npm run build`, artifacts from `dist/`, SPA rewrite of
   extensionless paths to `/index.html`, plus cache/header rules. Static SPA

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { updateApp } from '@/services/apps'
 import type { AppItem } from '@/services/apps'
 import { deleteLogo, uploadLogo } from '@/services/storage'
@@ -18,6 +19,7 @@ interface AppConfigPanelProps {
 export function AppConfigPanel({ app, onSaved }: AppConfigPanelProps) {
   const [name, setName] = useState(app.name)
   const [description, setDescription] = useState(app.description ?? '')
+  const [context, setContext] = useState(app.context ?? '')
   const [logoKey, setLogoKey] = useState(app.logo ?? '')
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
@@ -28,6 +30,7 @@ export function AppConfigPanel({ app, onSaved }: AppConfigPanelProps) {
   useEffect(() => {
     setName(app.name)
     setDescription(app.description ?? '')
+    setContext(app.context ?? '')
     setLogoKey(app.logo ?? '')
     setLogoFile(null)
     setSaved(false)
@@ -60,6 +63,7 @@ export function AppConfigPanel({ app, onSaved }: AppConfigPanelProps) {
         id: app.id,
         name: name.trim(),
         description: description.trim() || undefined,
+        context: context.trim() || undefined,
         logo: nextLogo || undefined,
       })
 
@@ -119,6 +123,20 @@ export function AppConfigPanel({ app, onSaved }: AppConfigPanelProps) {
               placeholder="What does this app do?"
               className="h-11 rounded-md border-hairline-soft"
             />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="config-context">Context</Label>
+            <Textarea
+              id="config-context"
+              value={context}
+              onChange={(e) => setContext(e.target.value)}
+              placeholder="Everything about your app — audience, voice, positioning, what makes it great…"
+              className="min-h-36 rounded-md border-hairline-soft"
+            />
+            <span className="text-[13px] leading-tight tracking-[-0.26px] text-stone">
+              Used as reference when generating content with AI.
+            </span>
           </div>
 
           <div className="flex flex-col gap-2">

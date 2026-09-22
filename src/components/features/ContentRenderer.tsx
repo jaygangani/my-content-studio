@@ -173,6 +173,14 @@ function parseVideoConfig(value: unknown): Record<string, unknown> {
   return parsed as Record<string, unknown>
 }
 
+function configString(
+  config: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = config[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
 /**
  * 9:16 stage that plays the first Pexels video for the content's keywords,
  * overlays the saved text timeline, and renders a downloadable file with the
@@ -187,6 +195,7 @@ export function ContentRenderer({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const audioGraphRef = useRef<AudioGraph | null>(null)
+  const lastTotalRef = useRef<number | null>(null)
   const savedSegments = useMemo(
     () => parseOverlayTimeline(content.overlayText),
     [content.overlayText],
@@ -224,6 +233,10 @@ export function ContentRenderer({
     () => parseVideoConfig(content.videoConfigurations),
     [content.videoConfigurations],
   )
+  const angleVibe =
+    configString(initialVideoConfig, 'angle_vibe') ??
+    configString(initialVideoConfig, 'motion_style')
+  const angleRationale = configString(initialVideoConfig, 'angle_rationale')
   const [finalDuration, setFinalDurationState] = useState<number | null>(() => {
     const saved = initialVideoConfig.duration
     return typeof saved === 'number' && Number.isFinite(saved) && saved > 0
@@ -254,8 +267,33 @@ export function ContentRenderer({
   }, [savedSegments])
 
   useEffect(() => {
+    const prevTotal = lastTotalRef.current
+    lastTotalRef.current = finalDuration
     if (!finalDuration || finalDuration <= 0) return
+    if (prevTotal === null || prevTotal === finalDuration) return
+
     setSegments((prev) => {
+      const lastEnd = Math.max(
+        0,
+        ...prev.map((segment) => segment.end_time_sec),
+      )
+      if (lastEnd === 0) return prev
+
+      if (finalDuration > lastEnd) {
+        const ratio = finalDuration / lastEnd
+        const round2 = (value: number) => Math.round(value * 100) / 100
+        return prev.map((segment) => {
+          const start = round2(segment.start_time_sec * ratio)
+          const end = round2(segment.end_time_sec * ratio)
+          return {
+            ...segment,
+            start_time_sec: start,
+            end_time_sec: end,
+            duration_sec: round2(end - start),
+          }
+        })
+      }
+
       let changed = false
       const next = prev.map((segment) => {
         const start = Math.min(
@@ -1028,6 +1066,23 @@ export function ContentRenderer({
             <p className="mt-1 line-clamp-2 text-sm leading-relaxed whitespace-pre-wrap text-graphite">
               {content.caption}
             </p>
+          </div>
+        ) : null}
+
+        {content.angel ? (
+          <div className="rounded-lg border border-hairline-soft bg-surface-cool/40 px-4 py-3">
+            <p className="micro-caps text-slate">Video angle</p>
+            <p className="mt-1 text-base font-semibold text-ink">
+              {content.angel}
+            </p>
+            {angleVibe ? (
+              <p className="mt-0.5 text-sm text-graphite">{angleVibe}</p>
+            ) : null}
+            {angleRationale ? (
+              <p className="mt-3 text-sm leading-relaxed text-ink-soft">
+                {angleRationale}
+              </p>
+            ) : null}
           </div>
         ) : null}
 

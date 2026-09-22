@@ -8,6 +8,7 @@ export interface AppInput {
   name: string
   logo?: string
   description?: string
+  context?: string
 }
 
 /** Input for updating an existing App. */

@@ -1,4 +1,6 @@
+import { fetchAuthSession } from 'aws-amplify/auth'
 import { dataClient, type Schema } from '@/lib/amplify'
+import outputs from '../../amplify_outputs.json'
 
 /** Shape of a Content record returned by the backend. */
 export type ContentItem = Schema['Content']['type']
@@ -101,4 +103,59 @@ export async function deleteContent(id: string): Promise<void> {
   if (errors?.length) {
     throw new Error(errors[0].message)
   }
+}
+
+/** Input for the authenticated generate-content HTTP API. */
+export interface GenerateContentDraftInput {
+  appId: string
+  type?: ContentType
+}
+
+/**
+ * POST /content/generate — API Gateway + Cognito JWT (logged-in users only).
+ * Lambda prompts live in the backend; response is a DRAFT Content row.
+ */
+export async function generateContentDraft(
+  input: GenerateContentDraftInput,
+): Promise<ContentItem> {
+  const baseUrl = (
+    outputs as { custom?: { GENERATE_CONTENT_API_URL?: string } }
+  ).custom?.GENERATE_CONTENT_API_URL
+  if (!baseUrl) {
+    throw new Error(
+      'GENERATE_CONTENT_API_URL missing from amplify_outputs.json. Redeploy the backend.',
+    )
+  }
+
+  const session = await fetchAuthSession()
+  const token = session.tokens?.accessToken?.toString()
+  if (!token) {
+    throw new Error('You must be signed in to generate content.')
+  }
+
+  const response = await fetch(`${baseUrl}/content/generate`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  })
+
+  const payload = (await response.json().catch(() => null)) as
+    | ContentItem
+    | { message?: string }
+    | null
+
+  if (!response.ok) {
+    const message =
+      payload && typeof payload === 'object' && 'message' in payload
+        ? (payload as { message?: string }).message
+        : undefined
+    throw new Error(message ?? `Generate failed (${response.status}).`)
+  }
+  if (!payload) {
+    throw new Error('Empty response from generate API.')
+  }
+  return payload as ContentItem
 }
