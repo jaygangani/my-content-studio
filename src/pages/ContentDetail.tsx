@@ -39,7 +39,7 @@ export function ContentDetailPage() {
   }, [loadContent])
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-6 py-6">
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-6 lg:min-h-0">
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <Link
           to={`/apps/${appId}`}
@@ -49,6 +49,9 @@ export function ContentDetailPage() {
         </Link>
         {content ? (
           <>
+            <h1 className="text-subtitle line-clamp-1 text-ink">
+              {content.title}
+            </h1>
             {content.status ? (
               <span className="rounded-full border border-hairline px-3 py-1 text-xs text-graphite">
                 {formatEnum(content.status)}
@@ -87,7 +90,7 @@ export function ContentDetailPage() {
           This content item could not be found.
         </p>
       ) : (
-        <div className="mt-6">
+        <div className="mt-6 flex min-h-0 flex-1 flex-col">
           <ContentRenderer
             ref={renderRef}
             content={content}

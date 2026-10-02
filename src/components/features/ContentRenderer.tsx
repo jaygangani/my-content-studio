@@ -10,13 +10,25 @@ import type { RefObject } from 'react'
 import { Loader2, Pause, Play, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+
 import { searchVideos } from '@/services/pexels'
 import type { PexelsPick } from '@/services/pexels'
-import { searchTracks } from '@/services/music'
-import type { MusicTrack } from '@/services/music'
 import { updateContent } from '@/services/content'
 import type { ContentItem } from '@/services/content'
-import { audioQuery, parseAudioConfig, parseOverlayTimeline, segmentAt } from '@/types/content'
+import {
+  drawOverlay,
+  ensureOverlayFonts,
+  overlayAlignment,
+  overlayFontStack,
+  overlayTextCss,
+} from '@/lib/overlayText'
+import { cn } from '@/lib/utils'
+import {
+  DEFAULT_OVERLAY_STYLE,
+  normalizeOverlayStyle,
+  parseOverlayTimeline,
+  segmentAt,
+} from '@/types/content'
 import type { OverlaySegment } from '@/types/content'
 
 interface ContentRendererProps {
@@ -32,34 +44,7 @@ export interface ContentRendererHandle {
   render: () => void
 }
 
-interface AudioGraph {
-  ctx: AudioContext
-  musicGain: GainNode
-  destination: MediaStreamAudioDestinationNode
-}
-
-type VerticalAlign = 'top' | 'center' | 'bottom'
-type HorizontalAlign = 'left' | 'center' | 'right'
-
 const VIDEO_LENGTH_PRESETS = [5, 10, 15, 20] as const
-
-function alignment(position: string): {
-  vertical: VerticalAlign
-  horizontal: HorizontalAlign
-} {
-  const value = position.toLowerCase()
-  const vertical: VerticalAlign = value.includes('top')
-    ? 'top'
-    : value.includes('bottom')
-      ? 'bottom'
-      : 'center'
-  const horizontal: HorizontalAlign = value.includes('left')
-    ? 'left'
-    : value.includes('right')
-      ? 'right'
-      : 'center'
-  return { vertical, horizontal }
-}
 
 function drawCover(
   ctx: CanvasRenderingContext2D,
@@ -73,80 +58,6 @@ function drawCover(
   const dw = vw * scale
   const dh = vh * scale
   ctx.drawImage(video, (width - dw) / 2, (height - dh) / 2, dw, dh)
-}
-
-function wrapLines(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-): string[] {
-  const lines: string[] = []
-  let current = ''
-  for (const word of text.split(/\s+/)) {
-    const candidate = current ? `${current} ${word}` : word
-    if (ctx.measureText(candidate).width > maxWidth && current) {
-      lines.push(current)
-      current = word
-    } else {
-      current = candidate
-    }
-  }
-  if (current) lines.push(current)
-  return lines
-}
-
-function drawOverlay(
-  ctx: CanvasRenderingContext2D,
-  segment: OverlaySegment,
-  width: number,
-  height: number,
-) {
-  const fontSize = Math.round(width * 0.055)
-  const lineHeight = Math.round(fontSize * 1.28)
-  const maxWidth = width * 0.82
-  ctx.font = `600 ${fontSize}px "Geist Variable", system-ui, sans-serif`
-  ctx.textBaseline = 'top'
-  ctx.textAlign = 'center'
-
-  const lines = wrapLines(ctx, segment.text, maxWidth)
-  const padX = Math.round(fontSize * 0.75)
-  const padY = Math.round(fontSize * 0.55)
-  const boxWidth = Math.min(
-    Math.max(...lines.map((line) => ctx.measureText(line).width)) + padX * 2,
-    width - width * 0.06,
-  )
-  const boxHeight = lines.length * lineHeight + padY * 2 - (lineHeight - fontSize)
-
-  const { vertical, horizontal } = alignment(segment.screen_position)
-  const marginX = (width - boxWidth) / 2
-  const marginY =
-    vertical === 'top'
-      ? height * 0.12
-      : vertical === 'bottom'
-        ? height - boxHeight - height * 0.16
-        : (height - boxHeight) / 2
-  const x =
-    horizontal === 'left'
-      ? width * 0.06
-      : horizontal === 'right'
-        ? width - boxWidth - width * 0.06
-        : marginX
-  const textCenterX =
-    horizontal === 'left'
-      ? x + boxWidth / 2
-      : horizontal === 'right'
-        ? x + boxWidth / 2
-        : width / 2
-
-  ctx.fillStyle = 'rgba(3, 3, 3, 0.55)'
-  ctx.beginPath()
-  ctx.roundRect(x, marginY, boxWidth, boxHeight, Math.round(width * 0.02))
-  ctx.fill()
-
-  ctx.fillStyle = '#ffffff'
-  lines.forEach((line, index) => {
-    ctx.fillText(line, textCenterX, marginY + padY + index * lineHeight)
-  })
 }
 
 function sanitizeFilePart(value: string): string {
@@ -192,9 +103,7 @@ export function ContentRenderer({
   onRenderState,
 }: ContentRendererProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const audioGraphRef = useRef<AudioGraph | null>(null)
   const lastTotalRef = useRef<number | null>(null)
   const savedSegments = useMemo(
     () => parseOverlayTimeline(content.overlayText),
@@ -223,12 +132,7 @@ export function ContentRenderer({
   const [keywordsError, setKeywordsError] = useState<string | null>(null)
   const [editingKeyword, setEditingKeyword] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
-  const [tracks, setTracks] = useState<MusicTrack[]>([])
-  const [trackIndex, setTrackIndex] = useState(0)
-  const [musicPage, setMusicPage] = useState(1)
-  const [trackLoading, setTrackLoading] = useState(true)
-  const [trackError, setTrackError] = useState<string | null>(null)
-  const [musicVolume, setMusicVolume] = useState(0.8)
+
   const initialVideoConfig = useMemo(
     () => parseVideoConfig(content.videoConfigurations),
     [content.videoConfigurations],
@@ -255,7 +159,9 @@ export function ContentRenderer({
   const [newSegmentText, setNewSegmentText] = useState('')
   const [editingSegmentId, setEditingSegmentId] = useState<number | null>(null)
   const [segmentEditText, setSegmentEditText] = useState('')
+
   const [durationError, setDurationError] = useState<string | null>(null)
+  const [showMeta, setShowMeta] = useState(false)
 
   const totalLength = finalDuration ?? (duration || 0)
 
@@ -413,6 +319,9 @@ export function ContentRenderer({
       end_time_sec: end,
       duration_sec: Math.max(0, end - start),
       screen_position: 'Center',
+      style: normalizeOverlayStyle(
+        segments[segments.length - 1]?.style ?? DEFAULT_OVERLAY_STYLE,
+      ),
     }
     setTimingsSaved(false)
     setSegments((prev) =>
@@ -448,6 +357,10 @@ export function ContentRenderer({
     if (segmentEditText.trim()) updateSegmentText(editingSegmentId, segmentEditText)
     setEditingSegmentId(null)
   }
+
+
+
+
 
   const keywords = useMemo(
     () =>
@@ -501,11 +414,6 @@ export function ContentRenderer({
     }
     setEditingKeyword(null)
   }
-
-  const musicQuery = useMemo(
-    () => audioQuery(parseAudioConfig(content.audioConfig)),
-    [content.audioConfig],
-  )
 
   const loadKeyword = useCallback(
     async (index: number, pageArg = 1) => {
@@ -578,55 +486,9 @@ export function ContentRenderer({
     void loadKeyword(nextIndex, nextPage)
   }
 
-  const loadTracks = useCallback(
-    async (nextPage = 1) => {
-      setTrackLoading(true)
-      setTrackError(null)
-      try {
-        if (!musicQuery) {
-          throw new Error(
-            'This content has no audio config to search music for.',
-          )
-        }
-        const found = await searchTracks(musicQuery, 10, nextPage)
-        setTracks(found)
-        setTrackIndex(0)
-        setMusicPage(nextPage)
-        if (!found.length) {
-          setTrackError(
-            `No tracks found for "${musicQuery}" (page ${nextPage}).`,
-          )
-        }
-      } catch (err) {
-        setTracks([])
-        setTrackError(
-          err instanceof Error ? err.message : 'Failed to load music',
-        )
-      } finally {
-        setTrackLoading(false)
-      }
-    },
-    [musicQuery],
-  )
 
-  useEffect(() => {
-    void loadTracks()
-  }, [loadTracks])
 
-  const track = tracks[trackIndex] ?? null
 
-  /** Next loaded track; once wrapped, fetches the next Jamendo page. */
-  const nextTrack = () => {
-    if (!tracks.length) {
-      void loadTracks()
-      return
-    }
-    if (trackIndex + 1 < tracks.length) {
-      setTrackIndex(trackIndex + 1)
-      return
-    }
-    void loadTracks(musicPage + 1)
-  }
 
   const lastTimeRef = useRef(0)
 
@@ -641,7 +503,6 @@ export function ContentRenderer({
         if (limit !== null && time >= limit) {
           video.pause()
           video.currentTime = limit
-          audioRef.current?.pause()
           lastTimeRef.current = limit
           setCurrentTime(limit)
           setScrubbing(false)
@@ -660,49 +521,9 @@ export function ContentRenderer({
     return () => cancelAnimationFrame(frame)
   }, [playing, finalDuration])
 
-  /**
-   * Builds a Web Audio graph once so only the music track is mixed and
-   * captured into a recordable track. The source video plays as a silent
-   * background visual. Returns null when the browser refuses (e.g. a
-   * non-CORS media source).
-   */
-  const ensureAudioGraph = useCallback((): AudioGraph | null => {
-    if (audioGraphRef.current) return audioGraphRef.current
-    const audio = audioRef.current
-    if (!audio) return null
-    try {
-      const ctx = new AudioContext()
-      const musicGain = ctx.createGain()
-      ctx.createMediaElementSource(audio).connect(musicGain)
-      musicGain.connect(ctx.destination)
-      const destination = ctx.createMediaStreamDestination()
-      musicGain.connect(destination)
-      musicGain.gain.value = musicVolume
-      const graph: AudioGraph = { ctx, musicGain, destination }
-      audioGraphRef.current = graph
-      return graph
-    } catch {
-      return null
-    }
-  }, [musicVolume])
-
-  useEffect(() => {
-    const graph = audioGraphRef.current
-    if (graph) {
-      graph.musicGain.gain.value = musicVolume
-      return
-    }
-    if (audioRef.current) audioRef.current.volume = musicVolume
-  }, [musicVolume])
-
   const togglePlay = () => {
     const video = videoRef.current
     if (!video) return
-    const audio = audioRef.current
-    const graph = ensureAudioGraph()
-    if (graph && graph.ctx.state === 'suspended') {
-      void graph.ctx.resume()
-    }
     if (video.paused) {
       const limit = playbackLimit()
       if (limit !== null && video.currentTime >= limit) {
@@ -710,14 +531,9 @@ export function ContentRenderer({
         lastTimeRef.current = 0
         setCurrentTime(0)
       }
-      if (audio && track) {
-        audio.currentTime = 0
-        void audio.play()
-      }
       void video.play()
     } else {
       video.pause()
-      audio?.pause()
     }
   }
 
@@ -748,21 +564,7 @@ export function ContentRenderer({
     }
 
     const stream = canvas.captureStream(30)
-    let audioCaptured = false
-    const graph = ensureAudioGraph()
-    if (graph) {
-      if (graph.ctx.state === 'suspended') await graph.ctx.resume()
-      const mixed = graph.destination.stream.getAudioTracks()
-      mixed.forEach((track: MediaStreamTrack) => {
-        stream.addTrack(track)
-        audioCaptured = true
-      })
-    }
-    if (!audioCaptured) {
-      setRenderError(
-        'Could not mix audio into the render (browser blocked media capture). The render will be silent.',
-      )
-    }
+
 
     const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
       ? 'video/webm;codecs=vp9'
@@ -783,6 +585,14 @@ export function ContentRenderer({
       return
     }
 
+    try {
+      await ensureOverlayFonts(segments.map((segment) => segment.style))
+    } catch {
+      setRenderError(
+        'Could not load the overlay fonts — the render will use fallback faces.',
+      )
+    }
+
     const draw = (atTime: number) => {
       if (!videoRef.current) return
       ctx.clearRect(0, 0, width, height)
@@ -800,7 +610,6 @@ export function ContentRenderer({
       if (elapsed >= total) {
         cancelAnimationFrame(frame)
         draw(total)
-        audioRef.current?.pause()
         if (videoRef.current) videoRef.current.pause()
         if (recorder.state !== 'inactive') recorder.stop()
         return
@@ -811,16 +620,9 @@ export function ContentRenderer({
     }
 
     try {
-      const audio = audioRef.current
       video.pause()
       video.currentTime = 0
-      if (audio) {
-        audio.pause()
-        audio.currentTime = 0
-        audio.loop = true
-      }
       await video.play()
-      if (audio && track) void audio.play()
       recorder.start(100)
       renderLoop()
 
@@ -844,10 +646,9 @@ export function ContentRenderer({
           : 'Failed to render the video.',
       )
     } finally {
-      if (audioRef.current) audioRef.current.loop = false
       setRendering(false)
     }
-  }, [content.title, duration, ensureAudioGraph, finalDuration, segments, track])
+  }, [content.title, duration, finalDuration, segments])
 
   useImperativeHandle(
     ref,
@@ -868,13 +669,16 @@ export function ContentRenderer({
       ? Math.min(currentTime, finalDuration)
       : currentTime
   const activeSegment = segmentAt(segments, overlayTime)
+  const activeAlignment = activeSegment
+    ? overlayAlignment(activeSegment.screen_position)
+    : null
   const displayTime = scrubbing && scrubValue !== null ? scrubValue : currentTime
 
   return (
     <div className="flex flex-col gap-8 lg:h-[calc(100dvh-9rem)] lg:flex-row-reverse lg:gap-8 lg:overflow-hidden">
-      <div className="flex w-full flex-col lg:w-[420px] lg:shrink-0">
+      <div className="flex min-h-0 w-full flex-col lg:w-[420px] lg:shrink-0 lg:overflow-y-auto lg:pr-1">
         <div
-          className="relative mx-auto aspect-9/16 w-full overflow-hidden rounded-lg border border-hairline bg-ink [container-type:size]"
+          className="group relative mx-auto aspect-9/16 w-full overflow-hidden rounded-lg border border-hairline bg-ink [container-type:size]"
           style={{ width: 'min(420px, calc((100dvh - 16rem) * 9 / 16))' }}>
           {pick ? (
             <>
@@ -891,26 +695,49 @@ export function ContentRenderer({
                 onPause={() => setPlaying(false)}
                 onEnded={() => {
                   setPlaying(false)
-                  audioRef.current?.pause()
                 }}
               />
               {activeSegment ? (
                 <div className="pointer-events-none absolute inset-0 flex justify-center p-[6cqw]">
                   <p
-                    className={
-                      activeSegment.screen_position
-                        .toLowerCase()
-                        .includes('top')
-                        ? 'self-start w-fit max-w-[85cqw] rounded-md bg-[rgba(3,3,3,0.55)] px-[4.125cqw] py-[3.025cqw] text-center text-[5.5cqw] leading-[7.04cqw] font-semibold text-white'
-                        : activeSegment.screen_position
-                              .toLowerCase()
-                              .includes('bottom')
-                          ? 'self-end w-fit max-w-[85cqw] rounded-md bg-[rgba(3,3,3,0.55)] px-[4.125cqw] py-[3.025cqw] text-center text-[5.5cqw] leading-[7.04cqw] font-semibold text-white'
-                          : 'self-center w-fit max-w-[85cqw] rounded-md bg-[rgba(3,3,3,0.55)] px-[4.125cqw] py-[3.025cqw] text-center text-[5.5cqw] leading-[7.04cqw] font-semibold text-white'
-                    }
+                    className={cn(
+                      'shrink-0',
+                      activeAlignment?.vertical === 'top'
+                        ? 'self-start'
+                        : activeAlignment?.vertical === 'bottom'
+                          ? 'self-end'
+                          : 'self-center',
+                    )}
+                    style={overlayTextCss(activeSegment.style)}
                   >
                     {activeSegment.text}
                   </p>
+                </div>
+              ) : null}
+              {content.angel ? (
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex w-3/4 translate-x-2 items-center justify-end opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100">
+                  <div className="m-3 max-w-[80%] rounded-lg border border-hairline bg-canvas/95 p-3 backdrop-blur-sm">
+                    <p className="micro-caps text-slate">Video angle</p>
+                    <p className="mt-1 text-sm font-semibold text-ink">
+                      {content.angel}
+                    </p>
+                    {angleVibe ? (
+                      <p className="mt-0.5 text-xs text-graphite">{angleVibe}</p>
+                    ) : null}
+                    {angleRationale ? (
+                      <span className="group/tip relative mt-2 inline-block">
+                        <button
+                          type="button"
+                          className="text-xs text-graphite underline underline-offset-2 transition-colors hover:text-ink"
+                        >
+                          Why this relates
+                        </button>
+                        <span className="pointer-events-none absolute left-0 top-full z-10 mt-2 w-56 rounded-lg border border-hairline bg-canvas p-3 text-left text-xs leading-relaxed text-ink-soft opacity-0 transition-opacity group-hover/tip:opacity-100">
+                          {angleRationale}
+                        </span>
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
             </>
@@ -927,18 +754,7 @@ export function ContentRenderer({
           )}
         </div>
 
-        <audio
-          ref={audioRef}
-          src={track?.audio ?? undefined}
-          crossOrigin="anonymous"
-          preload="auto"
-          className="hidden"
-          onError={() => {
-            setTrackError('This track could not be loaded — fetching another.')
-            if (track) nextTrack()
-            else void loadTracks()
-          }}
-        />
+
 
         {duration ? (
           <div className="mt-3">
@@ -1052,15 +868,22 @@ export function ContentRenderer({
         ) : null}
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-5 lg:overflow-hidden">
-        <div className="flex items-baseline justify-between gap-4">
-          <p className="eyebrow text-slate">preview</p>
-          <h2 className="text-heading-sm line-clamp-1">
-            {content.title}
-          </h2>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 lg:overflow-y-auto lg:pr-1">
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowMeta((v) => !v)}
+            className="h-8 rounded-full px-3 text-xs"
+          >
+            {showMeta ? 'Hide details' : 'Show details'}
+          </Button>
         </div>
 
-        {content.caption ? (
+        {showMeta ? (
+          <>
+            {content.caption ? (
           <div>
             <p className="micro-caps text-slate">Caption</p>
             <p className="mt-1 line-clamp-2 text-sm leading-relaxed whitespace-pre-wrap text-graphite">
@@ -1079,9 +902,17 @@ export function ContentRenderer({
               <p className="mt-0.5 text-sm text-graphite">{angleVibe}</p>
             ) : null}
             {angleRationale ? (
-              <p className="mt-3 text-sm leading-relaxed text-ink-soft">
-                {angleRationale}
-              </p>
+              <span className="group/tip relative mt-3 inline-block">
+                <button
+                  type="button"
+                  className="text-sm text-graphite underline underline-offset-2 transition-colors hover:text-ink"
+                >
+                  Why this relates
+                </button>
+                <span className="pointer-events-none absolute left-0 top-full z-10 mt-2 w-64 rounded-lg border border-hairline bg-canvas p-3 text-left text-sm leading-relaxed text-ink-soft opacity-0 transition-opacity group-hover/tip:opacity-100">
+                  {angleRationale}
+                </span>
+              </span>
             ) : null}
           </div>
         ) : null}
@@ -1106,10 +937,12 @@ export function ContentRenderer({
             )}
           </div>
         </div>
+          </>
+        ) : null}
 
         <div>
           <div className="flex items-center justify-between gap-3">
-            <p className="micro-caps text-slate">Video keywords</p>
+            <p className="font-mono text-[11px] uppercase tracking-wide text-slate">Video keywords</p>
             <Button
               type="button"
               variant="outline"
@@ -1205,7 +1038,7 @@ export function ContentRenderer({
 
         <div>
           <div className="flex items-center justify-between gap-3">
-            <p className="micro-caps text-slate">Overlay timeline</p>
+            <p className="font-mono text-[11px] uppercase tracking-wide text-slate">Overlay timeline</p>
             {dirty || timingsSaved ? (
               <div className="flex items-center gap-3">
                 {timingsSaved && !dirty ? (
@@ -1243,97 +1076,107 @@ export function ContentRenderer({
               segments.map((segment, index) => (
                 <li
                   key={segment.segment_id}
-                  className="flex items-center gap-2 rounded-md border border-hairline px-3 py-2 text-sm text-graphite"
+                  className="rounded-md border border-hairline px-3 py-2 text-sm text-graphite"
                 >
-                  {editingSegmentId === segment.segment_id ? (
-                    <Input
-                      value={segmentEditText}
-                      onChange={(e) => setSegmentEditText(e.target.value)}
-                      onBlur={commitSegmentEdit}
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') commitSegmentEdit()
-                        if (e.key === 'Escape') setEditingSegmentId(null)
-                      }}
-                      aria-label={`Edit overlay text ${index + 1}`}
-                      className="h-7 min-w-0 flex-1 border-hairline-soft px-2 text-xs text-ink"
-                    />
-                  ) : (
+                  <div className="flex items-center gap-2">
+                    {editingSegmentId === segment.segment_id ? (
+                      <Input
+                        value={segmentEditText}
+                        onChange={(e) => setSegmentEditText(e.target.value)}
+                        onBlur={commitSegmentEdit}
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitSegmentEdit()
+                          if (e.key === 'Escape') setEditingSegmentId(null)
+                        }}
+                        aria-label={`Edit overlay text ${index + 1}`}
+                        className="h-7 min-w-0 flex-1 border-hairline-soft px-2 text-xs text-ink"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingSegmentId(segment.segment_id)
+                          setSegmentEditText(segment.text)
+                        }}
+                        title="Edit text"
+                        className="min-w-0 flex-1 truncate text-left text-ink transition-colors hover:text-graphite"
+                        style={{
+                          fontFamily: overlayFontStack(segment.style.font),
+                          fontWeight: segment.style.weight,
+                          fontStyle: segment.style.italic ? 'italic' : 'normal',
+                          textTransform: segment.style.uppercase
+                            ? 'uppercase'
+                            : 'none',
+                        }}
+                      >
+                        {segment.text}
+                      </button>
+                    )}
+                    <span className="shrink-0 text-[10px] text-slate">
+                      {segment.screen_position}
+                    </span>
+                    <label className="flex shrink-0 items-center gap-1">
+                      <span className="text-[10px] text-slate">Start</span>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={Number(segment.start_time_sec.toFixed(2))}
+                        onChange={(e) =>
+                          updateTiming(
+                            segment.segment_id,
+                            'start_time_sec',
+                            e.target.value,
+                          )
+                        }
+                        className="h-7 w-14 rounded-md border-hairline-soft px-2 text-xs"
+                      />
+                    </label>
+                    <label className="flex shrink-0 items-center gap-1">
+                      <span className="text-[10px] text-slate">End</span>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={Number(segment.end_time_sec.toFixed(2))}
+                        onChange={(e) =>
+                          updateTiming(
+                            segment.segment_id,
+                            'end_time_sec',
+                            e.target.value,
+                          )
+                        }
+                        className="h-7 w-14 rounded-md border-hairline-soft px-2 text-xs"
+                      />
+                    </label>
+                    <span className="w-10 shrink-0 text-xs text-slate">
+                      {segment.duration_sec.toFixed(1)}s
+                    </span>
+                    {finalDuration ?? duration ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateTiming(
+                            segment.segment_id,
+                            'end_time_sec',
+                            String(finalDuration ?? duration),
+                          )
+                        }
+                        className="shrink-0 text-xs text-graphite underline underline-offset-2 hover:text-ink"
+                      >
+                        to end
+                      </button>
+                    ) : null}
                     <button
                       type="button"
-                      onClick={() => {
-                        setEditingSegmentId(segment.segment_id)
-                        setSegmentEditText(segment.text)
-                      }}
-                      title="Edit text"
-                      className="min-w-0 flex-1 truncate text-left text-ink transition-colors hover:text-graphite"
+                      onClick={() => removeSegment(segment.segment_id)}
+                      aria-label={`Remove overlay text ${index + 1}`}
+                      className="shrink-0 text-slate transition-colors hover:text-ink"
                     >
-                      {segment.text}
+                      <X className="size-3.5" />
                     </button>
-                  )}
-                  <span className="shrink-0 text-[10px] text-slate">
-                    {segment.screen_position}
-                  </span>
-                  <label className="flex shrink-0 items-center gap-1">
-                    <span className="text-[10px] text-slate">Start</span>
-                    <Input
-                      type="number"
-                      min={0}
-                      step={0.1}
-                      value={Number(segment.start_time_sec.toFixed(2))}
-                      onChange={(e) =>
-                        updateTiming(
-                          segment.segment_id,
-                          'start_time_sec',
-                          e.target.value,
-                        )
-                      }
-                      className="h-7 w-14 rounded-md border-hairline-soft px-2 text-xs"
-                    />
-                  </label>
-                  <label className="flex shrink-0 items-center gap-1">
-                    <span className="text-[10px] text-slate">End</span>
-                    <Input
-                      type="number"
-                      min={0}
-                      step={0.1}
-                      value={Number(segment.end_time_sec.toFixed(2))}
-                      onChange={(e) =>
-                        updateTiming(
-                          segment.segment_id,
-                          'end_time_sec',
-                          e.target.value,
-                        )
-                      }
-                      className="h-7 w-14 rounded-md border-hairline-soft px-2 text-xs"
-                    />
-                  </label>
-                  <span className="w-10 shrink-0 text-xs text-slate">
-                    {segment.duration_sec.toFixed(1)}s
-                  </span>
-                  {finalDuration ?? duration ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateTiming(
-                          segment.segment_id,
-                          'end_time_sec',
-                          String(finalDuration ?? duration),
-                        )
-                      }
-                      className="shrink-0 text-xs text-graphite underline underline-offset-2 hover:text-ink"
-                    >
-                      to end
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => removeSegment(segment.segment_id)}
-                    aria-label={`Remove overlay text ${index + 1}`}
-                    className="shrink-0 text-slate transition-colors hover:text-ink"
-                  >
-                    <X className="size-3.5" />
-                  </button>
+                  </div>
                 </li>
               ))
             ) : (
@@ -1374,81 +1217,7 @@ export function ContentRenderer({
           ) : null}
         </div>
 
-        <div>
-          <div className="flex items-center justify-between gap-3">
-            <p className="micro-caps text-slate">Music</p>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={nextTrack}
-              disabled={trackLoading}
-              className="h-8 rounded-full px-4 text-xs"
-            >
-              <RefreshCw /> New track
-            </Button>
-          </div>
 
-          <div className="mt-3">
-            {trackLoading ? (
-              <p className="inline-flex items-center gap-2 text-sm text-slate">
-                <Loader2 className="size-4 animate-spin" /> Finding a track…
-              </p>
-            ) : track ? (
-              <div className="flex items-center gap-4 rounded-md border border-hairline px-4 py-3">
-                {track.image ? (
-                  <img
-                    src={track.image}
-                    alt=""
-                    className="size-12 rounded-md object-cover"
-                  />
-                ) : null}
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-ink">
-                    {track.name}
-                  </p>
-                  <p className="truncate text-xs text-slate">
-                    {track.artist}
-                    {track.album ? ` · ${track.album}` : ''}
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-graphite">
-                {trackError ?? 'No track.'}
-              </p>
-            )}
-          </div>
-
-          {trackError && track ? (
-            <p className="mt-2 text-xs text-slate">{trackError}</p>
-          ) : null}
-
-          {musicQuery ? (
-            <p className="mt-2 text-xs text-slate">Query: {musicQuery}</p>
-          ) : (
-            <p className="mt-2 text-xs text-slate">
-              No audio config saved for this content.
-            </p>
-          )}
-
-          <div className="mt-4">
-            <label className="flex flex-col gap-2">
-              <span className="flex items-center justify-between text-xs text-slate">
-                <span>Music volume</span>
-                <span>{Math.round(musicVolume * 100)}%</span>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={musicVolume}
-                onChange={(e) => setMusicVolume(Number(e.target.value))}
-                className="w-full cursor-pointer accent-ink"
-              />
-            </label>
-          </div>
-        </div>
 
         {pick ? (
           <p className="text-xs text-slate">

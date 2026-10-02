@@ -12,7 +12,15 @@ const CONTENT_TYPES = [
   'TEXT_POST',
 ] as const;
 
-const DURATION_OPTIONS = [5, 10, 15, 20] as const;
+/** Narrative formats the moment can be packaged in. */
+const FORMATS = [
+  'POV',
+  'Overheard-thought',
+  'Text-to-a-friend',
+  'Screenshot-caption',
+  'Confession',
+  'Rant',
+] as const;
 
 type VideoAngle = {
   angle: string;
@@ -129,31 +137,98 @@ const VIDEO_ANGLES: VideoAngle[] = [
   },
 ];
 
+const DURATION_OPTIONS = [6, 9, 12] as const;
+
+const ENERGY_LEVELS = ['High', 'Medium', 'Quiet-but-real'] as const;
+
 /**
  * Prompts are edited in the Lambda — not passed from the client.
  * `SYSTEM_PROMPT` is extended at runtime with the app's `context` field
  * (Apps model) as reference; `USER_PROMPT` is the generation task.
  */
-const SYSTEM_PROMPT = `You are an expert viral content strategist specializing in short-form videos (Reels, TikToks, YouTube Shorts) and social media copy.
+const SYSTEM_PROMPT = `You are a short-form content strategist who finds real, specific human moments hiding inside a product's features — not a hook-generator applying templates.
 
 YOUR ROLE:
-You take the provided app context, target audience, and content intent, and generate a single, execution-ready JSON payload for automated video rendering pipelines and scheduling tools.
+You take the app described in the appended app context and produce ONE execution-ready JSON payload (matching the required schema below) for automated short-form video rendering and scheduling.
 
-RULES FOR CONTENT & TIMING:
-1. CRISP & RELATABLE: Avoid corporate marketing buzzwords. Use authentic, conversational language (including Devanagari script for Hindi/Gujarati when requested).
-2. TIMING ACCURACY: overlay_text_timeline segments must exactly tile total_video_duration_seconds — the first starts at 0, segments are contiguous (end of one equals start of the next), no gaps or overlaps, the last ends exactly at the total.
-3. AMBIENT VISUALS: Provide specific, high-contrast search terms for Pexels b-roll footage.
-4. STRICT JSON OUTPUT: Return ONLY valid JSON matching the requested schema. No prose, no markdown wrappers, no introductory or trailing text.
-5. CHOSEN ANGLE: A selected video angle is appended at the end of this prompt. Match post_metadata.angle to it exactly, derive overlay text, hooks, search_keywords, and visual_description from its visual vibe, set motion_style to its pacing, and keep every copy decision aligned to it.
-6. CHOSEN DURATION: A total_video_duration_seconds value is appended at the end of this prompt. Set timing_config to exactly that value and tile overlay_text_timeline segments to it contiguously (first starts at 0, last ends exactly at the total).
-7. OVERLAY CRAFT: overlay_text_timeline text must be CRISP, PUNCHY, CONVERSATIONAL, and HOOK-DRIVEN. Plain spoken language, no corporate/generic filler. Segment 1 is the scroll-stopping hook — a question, a bold claim, or a relatable confession. Punctuation (—, ?, !, …) carries rhythm.`;
+FIND THE MOMENT:
+1. Find a concrete "moment" — an actual scene of a real reaction that happens BECAUSE of a specific mechanic in the product. Not a generic pain point. A specific, almost embarrassing, true-to-life scene.
+2. Ask: "What's the weird/funny/surprising THING that happens the first time someone uses this feature, that they'd immediately tell a friend about?" Not the benefit. The scene.
+3. Look for: unexpected side effects, an "wait, that's it?" reaction, something the user does without meaning to (laughs, double-checks, screenshots it), a moment of relief or disbelief that's oddly specific.
+4. Reject any moment that could apply to ANY app in the category — if you could swap the app name and it still works, it's not specific enough.
+5. Write it in moment_found (one sentence) and why_this_is_specific (one line on why this moment could ONLY come from this feature).
+
+WRITING RULES (NON-NEGOTIABLE):
+1. Write like you're texting a friend about something that just happened to you. Not writing copy.
+2. NEVER use: "game changer", "level up", "seamless", "empower", "revolutionize", "unlock", any word that sounds like a pitch deck.
+3. Total on-screen text under 25 words. One scene, not an explanation of the product.
+4. Don't explain the mechanic in the hook — let the moment imply it. The confusion/curiosity is the hook.
+5. Imperfect is good — contractions, trailing off, a "lol", a stray emoji. Not polished grammar.
+6. Vary the format across drafts — POV is one option, not the default. Also use: overheard-thought, mid-text-to-a-friend, a screenshot caption, a confession, a rant. Match post_metadata.format to the SELECTED FORMAT appended at the end of this prompt and write the overlay text in that format's voice.
+7. If it reads like it could've been written by an AI, rewrite it. Read it out loud — if you wouldn't actually say it, cut it.
+
+VIDEO RULES:
+1. The video's energy must MATCH the emotion in the text, not sit generically in the background. Laughing text = someone actually mid-laugh, not a slow ambient shot. Shock = a real double-take, not staring blankly.
+2. Default to HIGH energy and real human reactions (laughing, gasping, wide-eyed, doing a double take, mid-motion) over slow ambient B-roll — this should feel like a real clip someone caught on their phone, not a stock mood video.
+3. Only go slow/ambient when the text itself is quiet/reflective (a confession, a quiet realization) — energy must track the text, never default to calm.
+4. search_keywords must describe an actual candid reaction, not a mood ("aunty laughing candid phone camera" not "happy person warm lighting"). Set video_config.energy_level to High / Medium / Quiet-but-real to match the text's emotion.
+
+OUTPUT & TIMING RULES:
+1. STRICT JSON OUTPUT: Return ONLY valid JSON matching the required schema. No prose, no markdown wrappers, no introductory or trailing text.
+2. CHOSEN FORMAT: A selected format is appended at the end of this prompt. Match post_metadata.format to it exactly and keep every copy decision aligned to it.
+3. CHOSEN ANGLE: A selected video angle is appended at the end of this prompt. Match post_metadata.angle to it exactly. It sets the emotional frame (FOMO, Social Proof, Curiosity Gap, …) while the moment stays the specific scene — derive overlay tone, energy and pacing from the angle's vibe, never let it flatten the scene into a generic template.
+4. CHOSEN DURATION: A total_video_duration_seconds value is appended at the end of this prompt. Set timing_config to exactly that value. overlay_text_timeline segments must tile it exactly — the first starts at 0, segments are contiguous (end of one equals start of the next), no gaps or overlaps, the last ends exactly at the total.
+5. OVERLAY CRAFT: overlay_text_timeline must have EXACTLY ONE segment. Text must be CRISP, PUNCHY, CONVERSATIONAL, and HOOK-DRIVEN, under 25 words total. The single segment is the scroll-stopping hook — a question, a bold claim, or a relatable confession. Punctuation (—, ?, !, …) carries rhythm. Mirror the exact overlay text in full_static_overlay_string (no line breaks).
+
+REQUIRED SCHEMA:
+{
+  "moment_found": "The specific real scene this content is built around, one sentence",
+  "why_this_is_specific": "One line on why this moment could ONLY come from this feature, not any app in the category",
+  "post_metadata": {
+    "short_title": "3-6 word internal title",
+    "content_type": "SHORT_FORM_VIDEO | CAROUSEL | MEME | SINGLE_IMAGE | TEXT_POST",
+    "format": "POV | Overheard-thought | Text-to-a-friend | Screenshot-caption | Confession | Rant",
+    "angle": "Selected angle name that frames the moment (e.g. FOMO, Social Proof, Curiosity Gap)",
+    "target_persona": "Who this specific moment lands with"
+  },
+  "timing_config": {
+    "total_video_duration_seconds": 6,
+    "loop_friendly": true
+  },
+  "overlay_text_timeline": [
+    { "segment_id": 1, "text": "...", "start_time_sec": 0, "end_time_sec": 3, "duration_sec": 3 }
+  ],
+  "full_static_overlay_string": "Full text block as it appears if shown statically",
+  "video_config": {
+    "energy_level": "High | Medium | Quiet-but-real",
+    "reaction_description": "Exactly what the person on screen is doing, specific not generic",
+    "search_keywords": ["candid reaction keyword 1", "keyword 2", "keyword 3"],
+    "orientation": "portrait",
+    "pacing": "Real-time reaction / Quick cut on the reaction beat / Handheld-feeling"
+  },
+  "audio_config": {
+    "sound_type": "Match energy — trending upbeat / candid ambient / quiet",
+    "suggested_track_vibe": "Short description"
+  },
+  "distribution": {
+    "caption": "Short, human caption — not a summary of the video",
+    "hashtags": ["#tag1", "#tag2", "#tag3"]
+  }
+}`;
 
 const USER_PROMPT = `Generate one content draft for the app described in the context.
-Follow the selected angle and selected duration in the system prompt — the hook, overlays, visuals, pacing, and timing must all serve them.
-Pick the best content type for the idea, a scroll-stopping hook, an authentic caption with a few tasteful emojis, 5-8 relevant hashtags, 3-6 Pexels search keywords, and a one-line relatability scenario.
-Write 2-3 overlay segments with crisp, hook-first wording that teases, provokes, or speaks the audience's own language — tile them to the selected duration, and mirror the exact overlay text in full_static_overlay_string (one line break per segment).`;
+
+Find the ONE strongest "moment" — the weird/funny/surprising thing that happens the first time someone uses this app, that they'd immediately tell a friend about. Not the benefit, the scene. It must be specific to THIS app's mechanics — if swapping the app name renders it false, it's not specific enough.
+
+Follow the selected angle, selected format, and selected duration appended in the system prompt — the hook, overlays, energy, pacing, and timing must all serve them.
+
+Pick the best content type for the moment, a scroll-stopping hook under 25 words total, an authentic caption with a few tasteful emojis, 5-8 relevant hashtags, 3-6 candid-reaction Pexels search keywords, and a video_config.energy_level (High / Medium / Quiet-but-real) that matches the emotion in the text.
+
+Write exactly 1 overlay text segment (one message) for the entire duration. The single segment starts at 0 and ends exactly at the total_video_duration_seconds. Keep it crisp, hook-first, text-a-friend wording — and mirror the exact overlay text in full_static_overlay_string.`;
 
 type ContentType = (typeof CONTENT_TYPES)[number];
+type Format = (typeof FORMATS)[number];
+type EnergyLevel = (typeof ENERGY_LEVELS)[number];
 
 type OverlaySegment = {
   segment_id: number;
@@ -161,17 +236,17 @@ type OverlaySegment = {
   start_time_sec: number;
   end_time_sec: number;
   duration_sec: number;
-  screen_position: string;
 };
 
 type GeneratedPayload = {
+  moment_found: string | null;
+  why_this_is_specific: string | null;
   post_metadata: {
     short_title: string;
     content_type: ContentType;
-    angle: string;
-    angle_rationale: string;
-    target_persona: string;
-    relatability_hook_scenario: string;
+    format: Format;
+    angle: string | null;
+    target_persona: string | null;
   };
   timing_config: {
     total_video_duration_seconds: number;
@@ -179,28 +254,20 @@ type GeneratedPayload = {
   };
   overlay_text_timeline: OverlaySegment[];
   full_static_overlay_string: string;
-  rendering_styling: {
-    text_position: string;
-    font_style: string;
-    text_box_bg: string;
-    primary_brand_hex: string;
-    highlight_words: string[];
-  };
-  audio_config: {
-    sound_type: string;
-    track_vibe: string;
-  };
-  video_api_config: {
+  video_config: {
+    energy_level: EnergyLevel;
+    reaction_description: string | null;
     search_keywords: string[];
     orientation: string;
-    motion_style: string;
-    visual_description: string;
-    dark_overlay_opacity: string;
+    pacing: string;
+  };
+  audio_config: {
+    sound_type: string | null;
+    suggested_track_vibe: string | null;
   };
   distribution: {
-    caption: string;
+    caption: string | null;
     hashtags: string[];
-    platform_notes: { reels: string; shorts: string; tiktok: string };
   };
 };
 
@@ -209,6 +276,8 @@ const GENERATED_JSON_SCHEMA = {
   additionalProperties: false,
   strict: true,
   properties: {
+    moment_found: { type: ['string', 'null'] },
+    why_this_is_specific: { type: ['string', 'null'] },
     post_metadata: {
       type: 'object',
       additionalProperties: false,
@@ -216,18 +285,16 @@ const GENERATED_JSON_SCHEMA = {
       properties: {
         short_title: { type: 'string' },
         content_type: { type: 'string', enum: [...CONTENT_TYPES] },
-        angle: { type: 'string' },
-        angle_rationale: { type: 'string' },
-        target_persona: { type: 'string' },
-        relatability_hook_scenario: { type: 'string' },
+        format: { type: 'string', enum: [...FORMATS] },
+        angle: { type: ['string', 'null'] },
+        target_persona: { type: ['string', 'null'] },
       },
       required: [
         'short_title',
         'content_type',
+        'format',
         'angle',
-        'angle_rationale',
         'target_persona',
-        'relatability_hook_scenario',
       ],
     },
     timing_config: {
@@ -252,7 +319,6 @@ const GENERATED_JSON_SCHEMA = {
           start_time_sec: { type: 'number' },
           end_time_sec: { type: 'number' },
           duration_sec: { type: 'number' },
-          screen_position: { type: 'string' },
         },
         required: [
           'segment_id',
@@ -260,28 +326,27 @@ const GENERATED_JSON_SCHEMA = {
           'start_time_sec',
           'end_time_sec',
           'duration_sec',
-          'screen_position',
         ],
       },
     },
     full_static_overlay_string: { type: 'string' },
-    rendering_styling: {
+    video_config: {
       type: 'object',
       additionalProperties: false,
       strict: true,
       properties: {
-        text_position: { type: 'string' },
-        font_style: { type: 'string' },
-        text_box_bg: { type: 'string' },
-        primary_brand_hex: { type: 'string' },
-        highlight_words: { type: 'array', items: { type: 'string' } },
+        energy_level: { type: 'string', enum: [...ENERGY_LEVELS] },
+        reaction_description: { type: ['string', 'null'] },
+        search_keywords: { type: 'array', items: { type: 'string' } },
+        orientation: { type: 'string' },
+        pacing: { type: 'string' },
       },
       required: [
-        'text_position',
-        'font_style',
-        'text_box_bg',
-        'primary_brand_hex',
-        'highlight_words',
+        'energy_level',
+        'reaction_description',
+        'search_keywords',
+        'orientation',
+        'pacing',
       ],
     },
     audio_config: {
@@ -289,60 +354,31 @@ const GENERATED_JSON_SCHEMA = {
       additionalProperties: false,
       strict: true,
       properties: {
-        sound_type: { type: 'string' },
-        track_vibe: { type: 'string' },
+        sound_type: { type: ['string', 'null'] },
+        suggested_track_vibe: { type: ['string', 'null'] },
       },
-      required: ['sound_type', 'track_vibe'],
-    },
-    video_api_config: {
-      type: 'object',
-      additionalProperties: false,
-      strict: true,
-      properties: {
-        search_keywords: { type: 'array', items: { type: 'string' } },
-        orientation: { type: 'string' },
-        motion_style: { type: 'string' },
-        visual_description: { type: 'string' },
-        dark_overlay_opacity: { type: 'string' },
-      },
-      required: [
-        'search_keywords',
-        'orientation',
-        'motion_style',
-        'visual_description',
-        'dark_overlay_opacity',
-      ],
+      required: ['sound_type', 'suggested_track_vibe'],
     },
     distribution: {
       type: 'object',
       additionalProperties: false,
       strict: true,
       properties: {
-        caption: { type: 'string' },
+        caption: { type: ['string', 'null'] },
         hashtags: { type: 'array', items: { type: 'string' } },
-        platform_notes: {
-          type: 'object',
-          additionalProperties: false,
-          strict: true,
-          properties: {
-            reels: { type: 'string' },
-            shorts: { type: 'string' },
-            tiktok: { type: 'string' },
-          },
-          required: ['reels', 'shorts', 'tiktok'],
-        },
       },
-      required: ['caption', 'hashtags', 'platform_notes'],
+      required: ['caption', 'hashtags'],
     },
   },
   required: [
+    'moment_found',
+    'why_this_is_specific',
     'post_metadata',
     'timing_config',
     'overlay_text_timeline',
     'full_static_overlay_string',
-    'rendering_styling',
+    'video_config',
     'audio_config',
-    'video_api_config',
     'distribution',
   ],
 } as const;
@@ -414,7 +450,7 @@ async function generateWithOpenAI(
     },
     body: JSON.stringify({
       model,
-      temperature: 0.7,
+      temperature: 0.9,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent },
@@ -459,7 +495,7 @@ async function generateWithOpenAI(
  * renders: overlayText, videoConfigurations, audioConfig keep their existing
  * JSON shapes so ContentRenderer works unchanged.
  */
-function toContentDraft(payload: GeneratedPayload, angle: VideoAngle): {
+function toContentDraft(payload: GeneratedPayload): {
   title: string;
   type: ContentType;
   caption: string | null;
@@ -473,10 +509,13 @@ function toContentDraft(payload: GeneratedPayload, angle: VideoAngle): {
   audioConfig: string;
 } {
   const hashtags = asStringArray(payload.distribution.hashtags);
-  const videoKeywords = asStringArray(payload.video_api_config.search_keywords);
-  const highlightWords = asStringArray(
-    payload.rendering_styling.highlight_words,
-  );
+  const videoKeywords = asStringArray(payload.video_config.search_keywords);
+  const moment = nullableString(payload.moment_found);
+  const rationale = nullableString(payload.why_this_is_specific);
+  const energyLevel = nullableString(payload.video_config.energy_level);
+  const pacing = nullableString(payload.video_config.pacing);
+  const reaction = nullableString(payload.video_config.reaction_description);
+  const trackVibe = nullableString(payload.audio_config.suggested_track_vibe);
   const duration = Math.min(
     20,
     Math.max(1, payload.timing_config.total_video_duration_seconds),
@@ -489,9 +528,7 @@ function toContentDraft(payload: GeneratedPayload, angle: VideoAngle): {
     hashtags,
     videoKeywords,
     targetPersona: nullableString(payload.post_metadata.target_persona),
-    relatabilityHook: nullableString(
-      payload.post_metadata.relatability_hook_scenario,
-    ),
+    relatabilityHook: moment,
     angel: nullableString(payload.post_metadata.angle),
     overlayText: JSON.stringify({
       overlay_text_timeline: payload.overlay_text_timeline,
@@ -500,22 +537,25 @@ function toContentDraft(payload: GeneratedPayload, angle: VideoAngle): {
     videoConfigurations: JSON.stringify({
       duration,
       loop_friendly: payload.timing_config.loop_friendly,
-      angle_vibe: angle.vibe,
-      angle_visual: angle.visual,
-      angle_pacing: angle.pacing,
-      angle_rationale: nullableString(payload.post_metadata.angle_rationale) ?? '',
-      text_position: payload.rendering_styling.text_position,
-      font_style: payload.rendering_styling.font_style,
-      text_box_bg: payload.rendering_styling.text_box_bg,
-      primary_brand_hex: payload.rendering_styling.primary_brand_hex,
-      highlight_words: highlightWords,
+      format: nullableString(payload.post_metadata.format),
+      moment_found: moment,
+      why_this_is_specific: rationale,
+      energy_level: energyLevel,
+      reaction_description: reaction,
       search_keywords: videoKeywords,
-      orientation: payload.video_api_config.orientation,
-      motion_style: payload.video_api_config.motion_style,
-      visual_description: payload.video_api_config.visual_description,
-      dark_overlay_opacity: payload.video_api_config.dark_overlay_opacity,
+      orientation: nullableString(payload.video_config.orientation),
+      pacing,
+      angle: nullableString(payload.post_metadata.angle),
+      angle_vibe: energyLevel,
+      angle_rationale: rationale,
+      motion_style: pacing,
+      visual_description: reaction,
     }),
-    audioConfig: JSON.stringify(payload.audio_config),
+    audioConfig: JSON.stringify({
+      sound_type: nullableString(payload.audio_config.sound_type),
+      track_vibe: trackVibe,
+      suggested_track_vibe: trackVibe,
+    }),
   };
 }
 
@@ -587,6 +627,7 @@ export const handler = async (
       return jsonResponse(404, { message: `App ${appId} not found.` });
     }
 
+    const format = FORMATS[Math.floor(Math.random() * FORMATS.length)];
     const angle =
       VIDEO_ANGLES[Math.floor(Math.random() * VIDEO_ANGLES.length)];
     const duration =
@@ -595,13 +636,14 @@ export const handler = async (
       SYSTEM_PROMPT,
       app.context ? `App context:\n${app.context}` : null,
       `SELECTED ANGLE FOR THIS DRAFT:\nAngle: ${angle.angle}\nVisual vibe: ${angle.vibe}\nVisual: ${angle.visual}\nPacing: ${angle.pacing}`,
+      `SELECTED FORMAT FOR THIS DRAFT:\nFormat: ${format}`,
       `SELECTED DURATION FOR THIS DRAFT (seconds): ${duration}`,
     ]
       .filter((part): part is string => Boolean(part))
       .join('\n\n');
 
     const generated = await generateWithOpenAI(apiKey, model, systemPrompt, type);
-    const draft = toContentDraft(generated, angle);
+    const draft = toContentDraft(generated);
 
     const { data, errors } = await client.models.Content.create({
       appId,

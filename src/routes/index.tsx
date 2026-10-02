@@ -18,12 +18,7 @@ interface RouteEntry {
 
 /* Route-level code splitting — each page loads on first navigation. */
 const routes: RouteEntry[] = [
-  {
-    path: '/home',
-    component: lazy(() =>
-      import('@/pages/Home').then((module) => ({ default: module.HomePage })),
-    ),
-  },
+
   {
     path: '/apps',
     component: lazy(() =>
@@ -83,7 +78,7 @@ function ProtectedShell(): ReactElement {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <AppHeader />
-      <main className="flex-1">
+      <main className="flex min-h-0 flex-1 flex-col">
         <Outlet />
       </main>
     </div>
@@ -95,7 +90,7 @@ export function AppRoutes(): ReactElement {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={<Navigate to="/home" replace />} />
+      <Route path="/" element={<Navigate to="/apps" replace />} />
       <Route element={<ProtectedShell />}>
         {routes.map((route) => (
           <Route

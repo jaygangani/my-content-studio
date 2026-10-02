@@ -123,6 +123,18 @@ src/
   Connect a branch in the Amplify console to use it; set the `VITE_*` env vars
   there (they are baked in at build). Deploys are manual (see Hard rules) —
   never run `ampx` commands or push unprompted.
+- **Overlay text styling** — each `overlayText` segment carries an optional
+  `style` object (`font`, `weight`, `size`, `tracking`, `align`, `uppercase`,
+  `italic`, `text_color`, `backdrop`, `backdrop_color`, `backdrop_opacity`).
+  Catalogs + normalization live in `src/types/content.ts`; rendering helpers
+  (font stacks, DOM preview CSS, canvas burn-in, font loading) live in
+  `src/lib/overlayText.ts`; the picker is
+  `src/components/features/OverlayStyleControls.tsx`. Old segments without a
+  `style` fall back to `DEFAULT_OVERLAY_STYLE` (the previous look). `geist` is
+  bundled; the other seven catalog fonts are injected on demand from Google
+  Fonts and awaited via `document.fonts.load()` before a render, so the export
+  never burns in a fallback face. The preview and the canvas read the same
+  style object — change both, never one.
 - **PWA** — `vite-plugin-pwa` generates `sw.js` + `manifest.webmanifest` at
   build. The app registers the SW in `src/main.tsx`.
 - **Env vars** — only `VITE_*` vars reach the client. `VITE_PEXELS_API_KEY`
