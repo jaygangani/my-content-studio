@@ -13,6 +13,7 @@ import { data } from './data/resource';
 import { storage } from './storage/resource';
 import {
   OPENAI_API_KEY_PARAM,
+  PEXELS_API_KEY_PARAM,
   generateContentFn,
 } from './functions/generate-content/resource';
 
@@ -28,6 +29,7 @@ backend.generateContentFn.resources.lambda.grantPrincipal.addToPrincipalPolicy(
     actions: ['ssm:GetParameter'],
     resources: [
       `arn:aws:ssm:*:${Aws.ACCOUNT_ID}:parameter${OPENAI_API_KEY_PARAM}`,
+      `arn:aws:ssm:*:${Aws.ACCOUNT_ID}:parameter${PEXELS_API_KEY_PARAM}`,
     ],
   }),
 );
@@ -61,7 +63,7 @@ const integration = new HttpLambdaIntegration(
 );
 
 httpApi.addRoutes({
-  path: '/content/generate',
+  path: '/content/{action}',
   methods: [HttpMethod.POST],
   integration,
   authorizer: cognitoAuthorizer,

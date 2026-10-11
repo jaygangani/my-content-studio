@@ -22,8 +22,8 @@ export default defineConfig({
         description: 'A clean, fast content engine.',
         start_url: '/',
         display: 'standalone',
-        background_color: '#ffffff',
-        theme_color: '#ffffff',
+        background_color: '#f5f5f5',
+        theme_color: '#f5f5f5',
         icons: [
           {
             src: '/favicon_io/android-chrome-192x192.png',

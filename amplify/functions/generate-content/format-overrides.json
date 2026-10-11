@@ -1,0 +1,147 @@
+{
+  "17": {
+    "layout": "card",
+    "sharpen": "Caption must name one exact situation and one exact reaction, in the persona's own words. One sentence. No 'when you' filler like 'when things get hard'. Good: 'Me when the tutorial says 'just' and then lists 14 steps.' Bad: 'Me when learning is tough.'"
+  },
+  "18": {
+    "layout": "columns",
+    "lineCount": 3,
+    "sharpen": "Write exactly 3 lines, each formatted 'Expectation text || Reality text'. Each side 3-9 words, concrete and visual: what they planned vs what actually happened, with a specific object, number or time. The reality side must be the funniest and most specific. Bad: 'I will learn fast || It was hard'. Good: 'Study 2 hours daily || 11 tabs open, 0 minutes learned'."
+  },
+  "19": {
+    "layout": "columns",
+    "lineCount": 1,
+    "sharpen": "Write exactly 1 line formatted 'Choice A || Choice B'. Both choices are things the persona genuinely agonises over, phrased as actions with a detail (time, object, app). Make B the one they secretly pick. No abstract nouns like 'productivity'."
+  },
+  "20": {
+    "layout": "stack",
+    "lineCount": 3,
+    "sharpen": "Write exactly 3 lines: 'Nobody:' then 'Absolutely nobody:' then 'Me: <one very specific behaviour with a time, number or object>'. The last line carries the whole joke, so it must be oddly precise and recognisable to the persona."
+  },
+  "21": {
+    "layout": "card",
+    "sharpen": "Format: 'Tell me you [identity] without telling me you [identity].' then a second line with the tell. The tell must be a small physical or digital habit (what is on their screen, what is in their bag, what they search at 1am), never a trait or feeling."
+  },
+  "61": {
+    "sharpen": "Each slide is one different meme with a different tension. No two slides may share the same joke mechanic. Every slide names a concrete moment, object or search term the persona recognises. Slide 1 is the strongest. Last slide ties back to the app naturally, without selling."
+  },
+  "62": {
+    "sharpen": "Slide 1 sets up a specific situation ending mid-thought with an ellipsis or a loaded 'so'. Slide 2 delivers a punchline that reverses the expectation with a concrete detail. The setup must be a real moment, not a general statement."
+  },
+  "63": {
+    "sharpen": "3-4 panels, each with one speaker line of max 8 words. Panel 1: a specific situation. Panel 2: the persona's wrong move. Panel 3: the consequence in a concrete detail. Panel 4 (optional): the turn that shows the app. Use two named characters, e.g. 'Me' and one invented friend name."
+  },
+  "64": {
+    "layout": "stack",
+    "lineCount": 4,
+    "sharpen": "Write exactly 4 notification lines, each formatted 'AppName: message'. Use invented app names only. Messages escalate: each one must be a believable notification from a different app that reveals one part of the persona's chaos, with a time or number in at least two of them. Last one is the app's gentle nudge."
+  },
+  "65": {
+    "layout": "columns",
+    "lineCount": 4,
+    "sharpen": "Write exactly 4 lines formatted 'Planned task || What actually happened'. Planned side is an ambitious, specific task with a number or time. Reality side is a specific, funny detour (what they did instead, with an object or app). No generic words like 'procrastinated' or 'got distracted'; show the actual distraction."
+  },
+  "66": {
+    "layout": "grid",
+    "lineCount": 9,
+    "sharpen": "Write exactly 9 lines for a 3x3 grid, row by row, top-left to bottom-right. Choose two axes from the persona's real behaviour in this niche (for example how much they plan vs how much they improvise, and how they react to being stuck). Each cell is one concrete behaviour of max 7 words that the persona would recognise instantly, with a specific object, action or search. Do not label cells with axis words like Organized or Chaotic. Make the corner cells the most extreme and the centre the most relatable. Bad cell: 'Watching a curated playlist'. Good cell: 'Saves 47 videos, watches none'."
+  },
+  "67": {
+    "layout": "stack",
+    "lineCount": 3,
+    "sharpen": "Write exactly 3 lines: left tail, middle peak, right tail. Left and right tails say the same simple thing in plain words; the middle says the overcomplicated version with specific jargon or a specific elaborate system. The right tail ends up at the same simple truth, with a concrete image. Each max 12 words."
+  },
+  "68": {
+    "layout": "stack",
+    "lineCount": 3,
+    "sharpen": "Write exactly 3 lines: Circle A label, Circle B label, then the overlap. Circle A and B are two concrete things the persona wants at once; the overlap is a specific, funny thing that exists only when both are true (a real behaviour, not an abstract noun). Each max 7 words."
+  },
+  "69": {
+    "sharpen": "The bar shows a believable process in the persona's life (a goal, not a gadget). Steps along the bar must be specific and escalate: a number, a time, an object. The final step, stuck at the last percentage, is the funniest and most relatable detail."
+  },
+  "70": {
+    "layout": "card",
+    "sharpen": "One headline in newspaper voice, 8-14 words, with an invented outlet name and a quoted invented expert. Subject is a specific everyday behaviour in this niche treated as a crisis. Include one precise number or time. Never mention real people, accounts, or news."
+  },
+  "71": {
+    "layout": "stack",
+    "lineCount": 3,
+    "sharpen": "Write exactly 3 lines for a fake post: line 1 is '@invented_handle', line 2 is the post text (max 22 words, in the first person, with a very specific detail), line 3 is 'N likes \u00b7 M comments' with absurdly specific numbers. The post must sound like something this persona would genuinely type."
+  },
+  "72": {
+    "layout": "card",
+    "sharpen": "The image prompt is a single weird, specific scene (an object, a place, a posture) that invites a caption; write that scene in visual_query-style concrete words. Provide the framing line 'Caption this:' only; do not give the caption."
+  },
+  "4": {
+    "sharpen": "Each rule is an imperative with a concrete object, number or time, never a value like 'be consistent'. Rules must contradict a habit the persona currently believes in. Bad: 'Practice daily'. Good: 'Stop re-watching. Close the video at minute 3 and do one thing.'"
+  },
+  "8": {
+    "sharpen": "Each item must be a fact a beginner genuinely would not know, stated as a specific claim with a reason, not an opinion. No 'it takes time' or 'be patient'. Order from surprising to most useful."
+  },
+  "11": {
+    "sharpen": "Each mistake names the exact action the persona does (what they click, say, skip) and the exact price they pay (time lost, number, outcome). End each with the fix in 4 words."
+  },
+  "13": {
+    "sharpen": "Give the framework a 2-3 word memorable name made of concrete words, then 3-4 steps that each start with a verb and include an example from the persona's day. No acronyms of abstract words."
+  },
+  "31": {
+    "sharpen": "Tiers must be 5-7 specific, nameable things from this niche (tools, habits, methods), not categories. S-tier and F-tier each get a one-line reason with a concrete detail. Take a stance that will start an argument."
+  },
+  "33": {
+    "sharpen": "Flags are observable behaviours with a specific moment (what someone says, what is on their screen, what they do at 11pm). Red flags must be uncomfortably true; green flags must be surprising, not praise. No generic traits like 'is disciplined'."
+  },
+  "34": {
+    "sharpen": "3-5 types, each with an invented but vivid name (2-3 words) and one signature behaviour with a specific object or time. Each type must be a person the persona has met or been. Include the type that makes the persona laugh at themselves."
+  },
+  "35": {
+    "sharpen": "Ten rungs 1-10 are too many; use 3 labelled anchor points (1, 5, 10) each a specific behaviour with a number or object. The question must be a habit, not a feeling."
+  },
+  "36": {
+    "sharpen": "Signs are small, specific, observable details (a browser tab, a saved folder, a phrase typed into search). Each sign max 9 words. Order so the last sign is the one that makes them say 'that is literally me'."
+  },
+  "40": {
+    "sharpen": "Two speakers, 6-8 messages, each max 10 words and written as real texts (lowercase, fragments, one typo or emoji allowed). The conflict is one specific misunderstanding that the app resolves. Avoid greetings."
+  },
+  "46": {
+    "sharpen": "Five levels, each named with a concrete behaviour not an adjective (not 'Beginner'; use what they actually do). Level 1 must be funny and specific, level 5 must be aspirational but realistic."
+  },
+  "47": {
+    "sharpen": "Quiz result types are 3-4 vivid named personas with one defining habit each. Question is one specific scenario with 3-4 answer options that sound like real actions. No 'it depends' options."
+  },
+  "48": {
+    "sharpen": "Do the arithmetic with numbers from the profile or show the calculation plainly. State the shocking number first, then the line that makes it personal ('That is X hours of your Tuesday')."
+  },
+  "57": {
+    "sharpen": "Tie to one real season or date moment that changes this persona's actual routine, with a specific behaviour that changes. Do not say 'new year, new you' or similar."
+  },
+  "29": {
+    "sharpen": "Two options that are each secretly the persona's identity, with a concrete detail on each side. Make both choices tempting and slightly embarrassing. No obvious right answer."
+  },
+  "38": {
+    "sharpen": "The permission is for one specific forbidden-feeling action the persona beats themselves up over (with the exact situation). Sign off with a sentence that sounds like a person, not a motivational poster."
+  },
+  "39": {
+    "sharpen": "Address one precise person: where they are, what they are doing, what they tried and failed at. The last line gives them one concrete thing to do tonight. No 'you are enough' phrasing."
+  },
+  "42": {
+    "sharpen": "Celebrate a tiny, specific win with the exact number or object ('opened the app 3 days in a row', 'finally understood what a margin is'). The tinier and more specific the better."
+  },
+  "43": {
+    "sharpen": "Pick 3-5 real terms a beginner in this niche has seen and not understood. Each: the term, then 'means:' plus a plain-language definition using an everyday object, max 10 words."
+  },
+  "44": {
+    "sharpen": "Cheat sheet entries are shortcuts the persona would screenshot: a command, a number, a rule of thumb. Each entry max 8 words and must contain something checkable (a number, a name, a step). No advice-only lines."
+  },
+  "5": {
+    "sharpen": "POV line puts the viewer in one exact moment (time, place, device, what is on screen). It must already contain the problem. Do not explain; let the scene carry it."
+  },
+  "6": {
+    "sharpen": "One sentence that reframes the persona's belief with a concrete contrast (A not B). No abstract nouns in both halves. It must be defensible and sting a little."
+  },
+  "1": {
+    "sharpen": "Write like a private note: first person, specific dates and objects (what they were doing, which app, how long). The turn is one concrete event, not an insight. End on the changed behaviour, not a moral."
+  },
+  "2": {
+    "sharpen": "The teaser promises something specific enough to be wrong. Each line adds one concrete detail (a number, a name, a time). The reveal must be a surprising fact or reframing, not a restatement."
+  }
+}

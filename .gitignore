@@ -27,3 +27,15 @@ dist-ssr
 .amplify
 amplify_outputs*
 amplifyconfiguration*
+
+# claude
+.claude/settings.local.json
+
+# web hosting deploy
+.env.deploy
+cdk-outputs.json
+infra/cdk.out
+infra/node_modules
+infra/.env
+.amplify-app-id
+outputs/

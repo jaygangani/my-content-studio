@@ -163,7 +163,7 @@ export function AppsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-6 py-16">
+    <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-16">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="eyebrow text-slate">apps</p>
@@ -187,7 +187,7 @@ export function AppsPage() {
       {loading ? (
         <p className="mt-12 text-sm text-slate">Loading…</p>
       ) : apps.length === 0 ? (
-        <Card className="mt-12 rounded-lg border-hairline bg-canvas p-0 shadow-none">
+        <Card className="mt-12 rounded-xl border-hairline bg-surface-card p-0 shadow-none">
           <CardHeader className="px-8 pt-8">
             <CardTitle className="text-heading-sm">No apps yet</CardTitle>
             <CardDescription className="text-base text-graphite">
@@ -196,14 +196,14 @@ export function AppsPage() {
           </CardHeader>
         </Card>
       ) : (
-        <Card className="mt-12 overflow-hidden rounded-lg border-hairline bg-canvas p-0 shadow-none">
+        <Card className="mt-12 overflow-hidden rounded-xl border-hairline bg-surface-card p-0 shadow-none">
           <Table>
             <TableHeader>
               <TableRow className="border-hairline">
-                <TableHead className="w-20 px-6">Logo</TableHead>
+                <TableHead className="w-16 px-3 sm:w-20 sm:px-6">Logo</TableHead>
                 <TableHead className="px-6">Name</TableHead>
-                <TableHead className="px-6">Description</TableHead>
-                <TableHead className="px-6">Logo key</TableHead>
+                <TableHead className="hidden px-6 md:table-cell">Description</TableHead>
+                <TableHead className="hidden px-6 lg:table-cell">Logo key</TableHead>
                 <TableHead className="w-20 px-6 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -225,10 +225,10 @@ export function AppsPage() {
                       {app.name}
                     </Link>
                   </TableCell>
-                  <TableCell className="px-6 py-4 text-sm text-graphite">
+                  <TableCell className="hidden px-6 py-4 text-sm text-graphite md:table-cell">
                     {app.description ?? '—'}
                   </TableCell>
-                  <TableCell className="max-w-[240px] truncate px-6 py-4 text-xs text-slate">
+                  <TableCell className="hidden max-w-[240px] truncate px-6 py-4 text-xs text-slate lg:table-cell">
                     {app.logo ?? '—'}
                   </TableCell>
                   <TableCell className="px-6 py-4 text-right">

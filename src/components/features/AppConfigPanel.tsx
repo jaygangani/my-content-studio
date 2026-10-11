@@ -97,10 +97,10 @@ export function AppConfigPanel({ app, onSaved }: AppConfigPanelProps) {
         </p>
       </div>
 
-      <Card className="mt-10 rounded-lg border-hairline bg-canvas p-0 shadow-none">
+      <Card className="mt-10 rounded-xl border-hairline bg-surface-card p-0 shadow-none">
         <form
           onSubmit={handleSubmit}
-          className="flex flex-col gap-6 px-8 py-8"
+          className="flex flex-col gap-6 px-4 py-6 sm:px-8 sm:py-8"
         >
           <div className="flex flex-col gap-2">
             <Label htmlFor="config-name">Name</Label>

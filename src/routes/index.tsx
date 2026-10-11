@@ -20,6 +20,12 @@ interface RouteEntry {
 const routes: RouteEntry[] = [
 
   {
+    path: '/feed',
+    component: lazy(() =>
+      import('@/pages/Feed').then((module) => ({ default: module.FeedPage })),
+    ),
+  },
+  {
     path: '/apps',
     component: lazy(() =>
       import('@/pages/Apps').then((module) => ({ default: module.AppsPage })),

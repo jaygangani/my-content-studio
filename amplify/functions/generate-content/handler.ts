@@ -2,567 +2,138 @@ import type { Schema } from '../../data/resource';
 import { Amplify } from 'aws-amplify';
 import { generateClient } from 'aws-amplify/data';
 import { getAmplifyDataClientConfig } from '@aws-amplify/backend/function/runtime';
-import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
+import {
+  FORMATS,
+  PILLARS,
+  SYSTEM_PROMPT,
+  TEXT_STYLE_KEYS,
+  getFormat,
+  inputsSatisfied,
+  pickAvoiding,
+  pickRandom,
+  pillarLabel,
+} from './catalog';
+import type { FormatEntry, Pillar, ProfileJson } from './catalog';
+import { callOpenAi, estimateCost, loadOpenAiKey } from './openai';
+import { SCHEMAS } from './schemas';
+import type {
+  CarouselPayload,
+  GeneratedPayload,
+  ImagePayload,
+  ReelPayload,
+} from './schemas';
+import { findAsset, searchImages, searchVideos } from './stock';
+import type { StockAsset } from './stock';
+import {
+  findInventedFacts,
+  parseBannedWords,
+  validatePayload,
+} from './validate';
 
-const CONTENT_TYPES = [
-  'SHORT_FORM_VIDEO',
-  'CAROUSEL',
-  'MEME',
-  'SINGLE_IMAGE',
-  'TEXT_POST',
-] as const;
+const DAILY_LIMIT = 5;
+const MAX_SKIP_REDRAWS = 3;
+const RECENT_WINDOW = 3;
 
-/** Narrative formats the moment can be packaged in. */
-const FORMATS = [
-  'POV',
-  'Overheard-thought',
-  'Text-to-a-friend',
-  'Screenshot-caption',
-  'Confession',
-  'Rant',
-] as const;
+type DataClient = ReturnType<typeof generateClient<Schema>>;
+type ContentRow = Schema['Content']['type'];
+type ContentTypeValue = NonNullable<ContentRow['type']>;
 
-type VideoAngle = {
-  angle: string;
-  vibe: string;
-  visual: string;
-  pacing: string;
-};
-
-const VIDEO_ANGLES: VideoAngle[] = [
-  {
-    angle: 'FOMO',
-    vibe: 'Shock / Panic / Fast-Paced',
-    visual:
-      'People staring intensely at phones, fast scrolling, crowds moving fast',
-    pacing: 'High energy / Quick cuts',
-  },
-  {
-    angle: 'Problem-Agitate-Solve',
-    vibe: 'Annoyed → Relief',
-    visual:
-      'Person sighing at a laptop screen, dropping head in hands, then smiling',
-    pacing: 'Medium (Slow start, fast resolution)',
-  },
-  {
-    angle: 'Frustration',
-    vibe: 'Anger / Stress / Exhaustion',
-    visual:
-      'Head shaking, facepalming, slow head tilt back, rubbing temples',
-    pacing: 'Slow, heavy, dramatic',
-  },
-  {
-    angle: 'Belief',
-    vibe: 'Inspiring / Focused / Serene',
-    visual:
-      'Early morning light, someone writing in notebook, calm walking in nature',
-    pacing: 'Steady, smooth cinematic',
-  },
-  {
-    angle: 'Controversial',
-    vibe: 'Skeptical / Side-Eye / Disbelief',
-    visual:
-      'Person looking directly into camera with raised eyebrow, smirk, or head shake',
-    pacing: 'Paused / Staring / Micro-expressions',
-  },
-  {
-    angle: 'Before / After',
-    vibe: 'Chaotic → Organized',
-    visual:
-      'Messy desk or cluttered phone screen transitioning into clean layout',
-    pacing: 'Dynamic contrast',
-  },
-  {
-    angle: 'Social Proof',
-    vibe: 'Happy / Excited / Shocked',
-    visual:
-      'Gasping, smiling widely, double-taking at phone screen',
-    pacing: 'Upbeat / High energy',
-  },
-  {
-    angle: 'Curiosity Gap',
-    vibe: 'Thinking / Suspenseful',
-    visual:
-      'Pacing back and forth, squinting at screen, tapping chin',
-    pacing: 'Slow building / Mysterious',
-  },
-  {
-    angle: 'Relatable Pain / POV',
-    vibe: 'Everyday / Boredom',
-    visual:
-      'Staring blankly at screen, mindless scrolling, tired late-night setup',
-    pacing: 'Slow, mundane',
-  },
-  {
-    angle: 'Confession',
-    vibe: 'Intimate / Reflective',
-    visual:
-      'Dimly lit room, close-up face, looking down then up at camera',
-    pacing: 'Static, deep, grounded',
-  },
-  {
-    angle: 'Myth-Busting',
-    vibe: 'Dismissive / Confident',
-    visual:
-      'Waving hand "no", smirking, shaking head with arms crossed',
-    pacing: 'Punchy / Direct',
-  },
-  {
-    angle: 'Hidden Feature Reveal',
-    vibe: 'Mind-Blown / Amazed',
-    visual:
-      'Wide eyes, open mouth, leaning close to screen in realization',
-    pacing: 'Mid-pace with sudden pause',
-  },
-  {
-    angle: 'Comparison',
-    vibe: 'Split / Analytical',
-    visual:
-      'Side-by-side split screen, or fast switching between bad/good states',
-    pacing: 'Quick rhythmic cuts',
-  },
-  {
-    angle: 'Challenge / Dare',
-    vibe: 'Motivated / Determined',
-    visual:
-      'Pressing start on a timer, tying shoes, focused eyes',
-    pacing: 'Upbeat / Driving pace',
-  },
-  {
-    angle: 'Satisfying',
-    vibe: 'ASMR / Smooth / Calming',
-    visual:
-      'Fluid animations, seamless UI swipes, organized progress bars filling',
-    pacing: 'Smooth, continuous motion',
-  },
-];
-
-const DURATION_OPTIONS = [6, 9, 12] as const;
-
-const ENERGY_LEVELS = ['High', 'Medium', 'Quiet-but-real'] as const;
-
-/**
- * Prompts are edited in the Lambda — not passed from the client.
- * `SYSTEM_PROMPT` is extended at runtime with the app's `context` field
- * (Apps model) as reference; `USER_PROMPT` is the generation task.
- */
-const SYSTEM_PROMPT = `You are a short-form content strategist who finds real, specific human moments hiding inside a product's features — not a hook-generator applying templates.
-
-YOUR ROLE:
-You take the app described in the appended app context and produce ONE execution-ready JSON payload (matching the required schema below) for automated short-form video rendering and scheduling.
-
-FIND THE MOMENT:
-1. Find a concrete "moment" — an actual scene of a real reaction that happens BECAUSE of a specific mechanic in the product. Not a generic pain point. A specific, almost embarrassing, true-to-life scene.
-2. Ask: "What's the weird/funny/surprising THING that happens the first time someone uses this feature, that they'd immediately tell a friend about?" Not the benefit. The scene.
-3. Look for: unexpected side effects, an "wait, that's it?" reaction, something the user does without meaning to (laughs, double-checks, screenshots it), a moment of relief or disbelief that's oddly specific.
-4. Reject any moment that could apply to ANY app in the category — if you could swap the app name and it still works, it's not specific enough.
-5. Write it in moment_found (one sentence) and why_this_is_specific (one line on why this moment could ONLY come from this feature).
-
-WRITING RULES (NON-NEGOTIABLE):
-1. Write like you're texting a friend about something that just happened to you. Not writing copy.
-2. NEVER use: "game changer", "level up", "seamless", "empower", "revolutionize", "unlock", any word that sounds like a pitch deck.
-3. Total on-screen text under 25 words. One scene, not an explanation of the product.
-4. Don't explain the mechanic in the hook — let the moment imply it. The confusion/curiosity is the hook.
-5. Imperfect is good — contractions, trailing off, a "lol", a stray emoji. Not polished grammar.
-6. Vary the format across drafts — POV is one option, not the default. Also use: overheard-thought, mid-text-to-a-friend, a screenshot caption, a confession, a rant. Match post_metadata.format to the SELECTED FORMAT appended at the end of this prompt and write the overlay text in that format's voice.
-7. If it reads like it could've been written by an AI, rewrite it. Read it out loud — if you wouldn't actually say it, cut it.
-
-VIDEO RULES:
-1. The video's energy must MATCH the emotion in the text, not sit generically in the background. Laughing text = someone actually mid-laugh, not a slow ambient shot. Shock = a real double-take, not staring blankly.
-2. Default to HIGH energy and real human reactions (laughing, gasping, wide-eyed, doing a double take, mid-motion) over slow ambient B-roll — this should feel like a real clip someone caught on their phone, not a stock mood video.
-3. Only go slow/ambient when the text itself is quiet/reflective (a confession, a quiet realization) — energy must track the text, never default to calm.
-4. search_keywords must describe an actual candid reaction, not a mood ("aunty laughing candid phone camera" not "happy person warm lighting"). Set video_config.energy_level to High / Medium / Quiet-but-real to match the text's emotion.
-
-OUTPUT & TIMING RULES:
-1. STRICT JSON OUTPUT: Return ONLY valid JSON matching the required schema. No prose, no markdown wrappers, no introductory or trailing text.
-2. CHOSEN FORMAT: A selected format is appended at the end of this prompt. Match post_metadata.format to it exactly and keep every copy decision aligned to it.
-3. CHOSEN ANGLE: A selected video angle is appended at the end of this prompt. Match post_metadata.angle to it exactly. It sets the emotional frame (FOMO, Social Proof, Curiosity Gap, …) while the moment stays the specific scene — derive overlay tone, energy and pacing from the angle's vibe, never let it flatten the scene into a generic template.
-4. CHOSEN DURATION: A total_video_duration_seconds value is appended at the end of this prompt. Set timing_config to exactly that value. overlay_text_timeline segments must tile it exactly — the first starts at 0, segments are contiguous (end of one equals start of the next), no gaps or overlaps, the last ends exactly at the total.
-5. OVERLAY CRAFT: overlay_text_timeline must have EXACTLY ONE segment. Text must be CRISP, PUNCHY, CONVERSATIONAL, and HOOK-DRIVEN, under 25 words total. The single segment is the scroll-stopping hook — a question, a bold claim, or a relatable confession. Punctuation (—, ?, !, …) carries rhythm. Mirror the exact overlay text in full_static_overlay_string (no line breaks).
-
-REQUIRED SCHEMA:
-{
-  "moment_found": "The specific real scene this content is built around, one sentence",
-  "why_this_is_specific": "One line on why this moment could ONLY come from this feature, not any app in the category",
-  "post_metadata": {
-    "short_title": "3-6 word internal title",
-    "content_type": "SHORT_FORM_VIDEO | CAROUSEL | MEME | SINGLE_IMAGE | TEXT_POST",
-    "format": "POV | Overheard-thought | Text-to-a-friend | Screenshot-caption | Confession | Rant",
-    "angle": "Selected angle name that frames the moment (e.g. FOMO, Social Proof, Curiosity Gap)",
-    "target_persona": "Who this specific moment lands with"
-  },
-  "timing_config": {
-    "total_video_duration_seconds": 6,
-    "loop_friendly": true
-  },
-  "overlay_text_timeline": [
-    { "segment_id": 1, "text": "...", "start_time_sec": 0, "end_time_sec": 3, "duration_sec": 3 }
-  ],
-  "full_static_overlay_string": "Full text block as it appears if shown statically",
-  "video_config": {
-    "energy_level": "High | Medium | Quiet-but-real",
-    "reaction_description": "Exactly what the person on screen is doing, specific not generic",
-    "search_keywords": ["candid reaction keyword 1", "keyword 2", "keyword 3"],
-    "orientation": "portrait",
-    "pacing": "Real-time reaction / Quick cut on the reaction beat / Handheld-feeling"
-  },
-  "audio_config": {
-    "sound_type": "Match energy — trending upbeat / candid ambient / quiet",
-    "suggested_track_vibe": "Short description"
-  },
-  "distribution": {
-    "caption": "Short, human caption — not a summary of the video",
-    "hashtags": ["#tag1", "#tag2", "#tag3"]
-  }
-}`;
-
-const USER_PROMPT = `Generate one content draft for the app described in the context.
-
-Find the ONE strongest "moment" — the weird/funny/surprising thing that happens the first time someone uses this app, that they'd immediately tell a friend about. Not the benefit, the scene. It must be specific to THIS app's mechanics — if swapping the app name renders it false, it's not specific enough.
-
-Follow the selected angle, selected format, and selected duration appended in the system prompt — the hook, overlays, energy, pacing, and timing must all serve them.
-
-Pick the best content type for the moment, a scroll-stopping hook under 25 words total, an authentic caption with a few tasteful emojis, 5-8 relevant hashtags, 3-6 candid-reaction Pexels search keywords, and a video_config.energy_level (High / Medium / Quiet-but-real) that matches the emotion in the text.
-
-Write exactly 1 overlay text segment (one message) for the entire duration. The single segment starts at 0 and ends exactly at the total_video_duration_seconds. Keep it crisp, hook-first, text-a-friend wording — and mirror the exact overlay text in full_static_overlay_string.`;
-
-type ContentType = (typeof CONTENT_TYPES)[number];
-type Format = (typeof FORMATS)[number];
-type EnergyLevel = (typeof ENERGY_LEVELS)[number];
-
-type OverlaySegment = {
-  segment_id: number;
-  text: string;
-  start_time_sec: number;
-  end_time_sec: number;
-  duration_sec: number;
-};
-
-type GeneratedPayload = {
-  moment_found: string | null;
-  why_this_is_specific: string | null;
-  post_metadata: {
-    short_title: string;
-    content_type: ContentType;
-    format: Format;
-    angle: string | null;
-    target_persona: string | null;
-  };
-  timing_config: {
-    total_video_duration_seconds: number;
-    loop_friendly: boolean;
-  };
-  overlay_text_timeline: OverlaySegment[];
-  full_static_overlay_string: string;
-  video_config: {
-    energy_level: EnergyLevel;
-    reaction_description: string | null;
-    search_keywords: string[];
-    orientation: string;
-    pacing: string;
-  };
-  audio_config: {
-    sound_type: string | null;
-    suggested_track_vibe: string | null;
-  };
-  distribution: {
-    caption: string | null;
-    hashtags: string[];
-  };
-};
-
-const GENERATED_JSON_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  strict: true,
-  properties: {
-    moment_found: { type: ['string', 'null'] },
-    why_this_is_specific: { type: ['string', 'null'] },
-    post_metadata: {
-      type: 'object',
-      additionalProperties: false,
-      strict: true,
-      properties: {
-        short_title: { type: 'string' },
-        content_type: { type: 'string', enum: [...CONTENT_TYPES] },
-        format: { type: 'string', enum: [...FORMATS] },
-        angle: { type: ['string', 'null'] },
-        target_persona: { type: ['string', 'null'] },
-      },
-      required: [
-        'short_title',
-        'content_type',
-        'format',
-        'angle',
-        'target_persona',
-      ],
-    },
-    timing_config: {
-      type: 'object',
-      additionalProperties: false,
-      strict: true,
-      properties: {
-        total_video_duration_seconds: { type: 'number' },
-        loop_friendly: { type: 'boolean' },
-      },
-      required: ['total_video_duration_seconds', 'loop_friendly'],
-    },
-    overlay_text_timeline: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        strict: true,
-        properties: {
-          segment_id: { type: 'number' },
-          text: { type: 'string' },
-          start_time_sec: { type: 'number' },
-          end_time_sec: { type: 'number' },
-          duration_sec: { type: 'number' },
-        },
-        required: [
-          'segment_id',
-          'text',
-          'start_time_sec',
-          'end_time_sec',
-          'duration_sec',
-        ],
-      },
-    },
-    full_static_overlay_string: { type: 'string' },
-    video_config: {
-      type: 'object',
-      additionalProperties: false,
-      strict: true,
-      properties: {
-        energy_level: { type: 'string', enum: [...ENERGY_LEVELS] },
-        reaction_description: { type: ['string', 'null'] },
-        search_keywords: { type: 'array', items: { type: 'string' } },
-        orientation: { type: 'string' },
-        pacing: { type: 'string' },
-      },
-      required: [
-        'energy_level',
-        'reaction_description',
-        'search_keywords',
-        'orientation',
-        'pacing',
-      ],
-    },
-    audio_config: {
-      type: 'object',
-      additionalProperties: false,
-      strict: true,
-      properties: {
-        sound_type: { type: ['string', 'null'] },
-        suggested_track_vibe: { type: ['string', 'null'] },
-      },
-      required: ['sound_type', 'suggested_track_vibe'],
-    },
-    distribution: {
-      type: 'object',
-      additionalProperties: false,
-      strict: true,
-      properties: {
-        caption: { type: ['string', 'null'] },
-        hashtags: { type: 'array', items: { type: 'string' } },
-      },
-      required: ['caption', 'hashtags'],
-    },
-  },
-  required: [
-    'moment_found',
-    'why_this_is_specific',
-    'post_metadata',
-    'timing_config',
-    'overlay_text_timeline',
-    'full_static_overlay_string',
-    'video_config',
-    'audio_config',
-    'distribution',
-  ],
-} as const;
-
-type ApiGatewayProxyEventV2 = {
+type ApiEvent = {
+  rawPath?: string;
   body?: string | null;
   isBase64Encoded?: boolean;
   requestContext?: {
-    authorizer?: {
-      jwt?: {
-        claims?: Record<string, unknown>;
-      };
-    };
+    authorizer?: { jwt?: { claims?: Record<string, unknown> } };
   };
 };
 
-type ApiGatewayProxyStructuredResultV2 = {
+type ApiResult = {
   statusCode: number;
   headers?: Record<string, string>;
   body: string;
 };
 
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter(Boolean);
+class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
-function nullableString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
+function log(step: string, data: Record<string, unknown> = {}): void {
+  console.log(JSON.stringify({ scope: 'generate-content', step, ...data }));
 }
 
-async function loadApiKeyFromSsm(): Promise<string> {
-  const param = process.env.OPENAI_API_KEY_PARAM;
-  if (!param) {
-    throw new Error('OPENAI_API_KEY_PARAM is not set on the function.');
-  }
+type GqlErrors = ReadonlyArray<{ message?: string }> | undefined;
 
-  const ssm = new SSMClient({});
-  const result = await ssm.send(
-    new GetParameterCommand({ Name: param, WithDecryption: true }),
-  );
-  const value = result.Parameter?.Value;
-  if (!value) {
-    throw new Error(
-      `SSM parameter ${param} missing or not readable by this Lambda.`,
-    );
-  }
-  return value;
+function logGqlErrors(step: string, errors: GqlErrors): string | null {
+  if (!errors?.length) return null;
+  const message = errors
+    .slice(0, 3)
+    .map((e) => e.message ?? 'GraphQL error')
+    .join('; ');
+  console.error(JSON.stringify({ scope: 'generate-content', step, gqlErrors: message }));
+  return message;
 }
 
-async function generateWithOpenAI(
-  apiKey: string,
-  model: string,
-  systemPrompt: string,
-  preferredType: string | null,
-): Promise<GeneratedPayload> {
-  const userContent = preferredType
-    ? `${USER_PROMPT}\n\nContent type must be: ${preferredType}.`
-    : USER_PROMPT;
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.9,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'generated_content',
-          strict: true,
-          schema: GENERATED_JSON_SCHEMA,
-        },
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(
-      `OpenAI request failed (${response.status}): ${detail.slice(0, 400)}`,
-    );
-  }
-
-  const body = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string | null } }>;
-  };
-  const content = body.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error('OpenAI returned an empty response.');
-  }
-
-  const parsed = JSON.parse(content) as GeneratedPayload;
-  const title = nullableString(parsed.post_metadata.short_title);
-  if (!title) {
-    throw new Error('Generated content is missing a title.');
-  }
-
-  return parsed;
+interface Selection {
+  format: FormatEntry;
+  personaId: string;
+  featureId: string;
+  pillar: Pillar;
 }
 
-/**
- * Flattens the nested OpenAI payload into the AppSync fields the app already
- * renders: overlayText, videoConfigurations, audioConfig keep their existing
- * JSON shapes so ContentRenderer works unchanged.
- */
-function toContentDraft(payload: GeneratedPayload): {
-  title: string;
-  type: ContentType;
-  caption: string | null;
-  hashtags: string[];
-  videoKeywords: string[];
-  targetPersona: string | null;
-  relatabilityHook: string | null;
-  angel: string | null;
-  overlayText: string;
-  videoConfigurations: string;
-  audioConfig: string;
-} {
-  const hashtags = asStringArray(payload.distribution.hashtags);
-  const videoKeywords = asStringArray(payload.video_config.search_keywords);
-  const moment = nullableString(payload.moment_found);
-  const rationale = nullableString(payload.why_this_is_specific);
-  const energyLevel = nullableString(payload.video_config.energy_level);
-  const pacing = nullableString(payload.video_config.pacing);
-  const reaction = nullableString(payload.video_config.reaction_description);
-  const trackVibe = nullableString(payload.audio_config.suggested_track_vibe);
-  const duration = Math.min(
-    20,
-    Math.max(1, payload.timing_config.total_video_duration_seconds),
-  );
-
-  return {
-    title: nullableString(payload.post_metadata.short_title) ?? 'Untitled',
-    type: payload.post_metadata.content_type,
-    caption: nullableString(payload.distribution.caption),
-    hashtags,
-    videoKeywords,
-    targetPersona: nullableString(payload.post_metadata.target_persona),
-    relatabilityHook: moment,
-    angel: nullableString(payload.post_metadata.angle),
-    overlayText: JSON.stringify({
-      overlay_text_timeline: payload.overlay_text_timeline,
-      full_static_overlay_string: payload.full_static_overlay_string,
-    }),
-    videoConfigurations: JSON.stringify({
-      duration,
-      loop_friendly: payload.timing_config.loop_friendly,
-      format: nullableString(payload.post_metadata.format),
-      moment_found: moment,
-      why_this_is_specific: rationale,
-      energy_level: energyLevel,
-      reaction_description: reaction,
-      search_keywords: videoKeywords,
-      orientation: nullableString(payload.video_config.orientation),
-      pacing,
-      angle: nullableString(payload.post_metadata.angle),
-      angle_vibe: energyLevel,
-      angle_rationale: rationale,
-      motion_style: pacing,
-      visual_description: reaction,
-    }),
-    audioConfig: JSON.stringify({
-      sound_type: nullableString(payload.audio_config.sound_type),
-      track_vibe: trackVibe,
-      suggested_track_vibe: trackVibe,
-    }),
-  };
+interface Attempt {
+  selection: Selection;
+  payload: GeneratedPayload;
+  promptTokens: number;
+  completionTokens: number;
 }
 
-function jsonResponse(
-  statusCode: number,
-  payload: unknown,
-): ApiGatewayProxyStructuredResultV2 {
+const ADDENDUM = [
+  'Output notes for this run:',
+  '- Always fill every field of the JSON schema. Use an empty string for "skip" when the piece is produced.',
+  '- If a required fact is missing from the App Profile, set "skip" to a short reason and leave the rest empty.',
+  '- Reel beats: 5-10 words each, total of all beat seconds between 15 and 30.',
+  '- Reel: the text of beat 1 IS the hook (use the same wording as "hook") and the text of the LAST beat IS the call to action (same wording as "cta"). There is no separate title or CTA on screen.',
+  '- Hook: at most 8 words. Slide headlines: at most 8 words. Slide bodies: at most 25 words.',
+  '- Every number, stat, review, comment, offer or milestone must come from the App Profile.',
+  '',
+  'Sharpness rules (apply to every piece):',
+  '- Specificity test: if a line could be pasted into a post for a different app unchanged, rewrite it.',
+  '- Name the exact moment: what the persona typed, tapped, searched, said or saw, with a time, number or object.',
+  '- Use the persona\'s own words and daily moments from the profile. Prefer a concrete noun over an abstract one (a tab, a notebook, a 1am search, not "productivity").',
+  '- Banned filler: "journey", "game changer", "level up", "unlock", "hack", "in today\'s world", "it takes time", labels like Organized or Chaotic.',
+  '- The first line must create tension or an open question the viewer needs resolved.',
+  '- Write for a total beginner who knows nothing yet: no jargon without a plain-word translation, and show the confusion they actually feel.',
+  '- Funny beats true: the most relatable detail goes last, and the app appears only in the CTA or as the one fix.',
+].join('\n');
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object') {
+    const errors = (error as { errors?: Array<{ message?: string }> }).errors;
+    if (Array.isArray(errors) && errors.length) {
+      return errors
+        .map((e) => e.message ?? 'GraphQL error')
+        .slice(0, 3)
+        .join('; ');
+    }
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+    try {
+      return JSON.stringify(error).slice(0, 300);
+    } catch {
+      return 'Unserialisable error object.';
+    }
+  }
+  return 'Unknown error.';
+}
+
+function jsonResponse(statusCode: number, payload: unknown): ApiResult {
   return {
     statusCode,
     headers: { 'content-type': 'application/json' },
@@ -570,107 +141,850 @@ function jsonResponse(
   };
 }
 
-/**
- * POST /content/generate behind API Gateway HTTP API + Cognito JWT authorizer
- * (authenticated Cognito users only). Body: `{ appId: string, type?: string }`.
- * Loads the OpenAI API key from SSM, generates structured JSON using the
- * prompts above, saves a DRAFT row on the existing Content model.
- */
-export const handler = async (
-  event: ApiGatewayProxyEventV2,
-): Promise<ApiGatewayProxyStructuredResultV2> => {
+function parseJsonField<T>(value: unknown, fallback: T): T {
+  if (value === null || value === undefined) return fallback;
   try {
-    const raw =
-      event.body == null
-        ? ''
-        : event.isBase64Encoded
-          ? Buffer.from(event.body, 'base64').toString('utf8')
-          : event.body;
+    const parsed: unknown =
+      typeof value === 'string' ? JSON.parse(value) : value;
+    return (parsed ?? fallback) as T;
+  } catch {
+    return fallback;
+  }
+}
 
-    let body: { appId?: unknown; type?: unknown } = {};
-    if (raw) {
-      try {
-        body = JSON.parse(raw) as typeof body;
-      } catch {
-        return jsonResponse(400, { message: 'Invalid JSON body.' });
-      }
-    }
+function parseProfile(row: Schema['AppProfile']['type'] | undefined): ProfileJson {
+  const list = (value: unknown) => parseJsonField<unknown[]>(value, []);
+  return {
+    personas: list(row?.personas) as ProfileJson['personas'],
+    features: list(row?.features) as ProfileJson['features'],
+    voice: parseJsonField<Record<string, string>>(row?.voice, {}),
+    proof: parseJsonField<Record<string, unknown[]>>(row?.proof, {}),
+    competitors: list(row?.competitors),
+    brand: parseJsonField<Record<string, string>>(row?.brand, {}),
+    storeUrl: row?.storeUrl ?? '',
+    ctaText: row?.ctaText ?? '',
+  };
+}
 
-    const appId =
-      typeof body.appId === 'string' && body.appId.trim()
-        ? body.appId.trim()
+function missingProfileFields(
+  description: string | null | undefined,
+  profile: ProfileJson,
+): string[] {
+  const missing: string[] = [];
+  if (!description?.trim()) missing.push('app description');
+  if (!profile.personas.some((p) => p.name?.trim())) missing.push('persona');
+  if (!profile.features.some((f) => f.name?.trim())) missing.push('feature');
+  if (!profile.voice.tone?.trim()) missing.push('voice tone');
+  if (!profile.ctaText.trim()) missing.push('CTA wording');
+  return missing;
+}
+
+function readBody(event: ApiEvent): Record<string, unknown> {
+  const raw =
+    event.body == null
+      ? ''
+      : event.isBase64Encoded
+        ? Buffer.from(event.body, 'base64').toString('utf8')
+        : event.body;
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    throw new HttpError(400, 'Invalid JSON body.');
+  }
+}
+
+function callerOwner(event: ApiEvent): string {
+  const claims = event.requestContext?.authorizer?.jwt?.claims ?? {};
+  const sub = typeof claims.sub === 'string' ? claims.sub : null;
+  const username =
+    typeof claims.username === 'string'
+      ? claims.username
+      : typeof claims['cognito:username'] === 'string'
+        ? (claims['cognito:username'] as string)
         : null;
-    if (!appId) {
-      return jsonResponse(400, { message: 'appId is required.' });
-    }
+  if (!sub || !username) throw new HttpError(401, 'Unauthenticated.');
+  return username;
+}
 
-    const type =
-      typeof body.type === 'string' &&
-      (CONTENT_TYPES as readonly string[]).includes(body.type)
-        ? body.type
-        : null;
+function ownerMatches(stored: string, username: string): boolean {
+  return stored === username || stored.split('::')[1] === username;
+}
 
-    const apiKey = await loadApiKeyFromSsm();
-    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+function requireString(body: Record<string, unknown>, key: string): string {
+  const value = body[key];
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new HttpError(400, `${key} is required.`);
+  }
+  return value.trim();
+}
 
-    const { resourceConfig, libraryOptions } = await getAmplifyDataClientConfig(
-      process.env as unknown as Parameters<
-        typeof getAmplifyDataClientConfig
-      >[0],
-    );
+function requireLocalDate(body: Record<string, unknown>): string {
+  const value = body.localDate;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new HttpError(400, 'localDate (YYYY-MM-DD) is required.');
+  }
+  return value;
+}
 
-    Amplify.configure(resourceConfig, libraryOptions);
-    const client = generateClient<Schema>();
+function fillTemplate(
+  format: FormatEntry,
+  profileJson: string,
+  selection: Selection,
+  persona: unknown,
+  feature: unknown,
+  appName: string,
+): string {
+  const rules = [
+    format.sharpen ? `Sharpening rules for this format:\n${format.sharpen}` : null,
+    format.lineCount
+      ? `Return exactly ${format.lineCount} entries in the main text array.`
+      : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n\n');
+  const template = rules
+    ? `${format.promptTemplate}\n\n${rules}`
+    : format.promptTemplate;
+  return template
+    .replaceAll('{{app_name}}', appName)
+    .replaceAll('{{persona}}', JSON.stringify(persona))
+    .replaceAll('{{pillar}}', pillarLabel(selection.pillar))
+    .replaceAll('{{feature}}', JSON.stringify(feature))
+    .replaceAll('{{app_profile_json}}', profileJson);
+}
 
-    const { data: app } = await client.models.Apps.get({ id: appId });
-    if (!app) {
-      return jsonResponse(404, { message: `App ${appId} not found.` });
-    }
+async function recentPicks(client: DataClient, appId: string) {
+  const { data } = await client.models.Content.list({
+    filter: { appId: { eq: appId } },
+  });
+  const latest = [...data]
+    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+    .slice(0, RECENT_WINDOW);
+  return {
+    personas: latest.map((c) => c.personaId).filter((v): v is string => !!v),
+    features: latest.map((c) => c.featureId).filter((v): v is string => !!v),
+    pillars: latest.map((c) => c.pillar).filter((v): v is Pillar => !!v),
+  };
+}
 
-    const format = FORMATS[Math.floor(Math.random() * FORMATS.length)];
-    const angle =
-      VIDEO_ANGLES[Math.floor(Math.random() * VIDEO_ANGLES.length)];
-    const duration =
-      DURATION_OPTIONS[Math.floor(Math.random() * DURATION_OPTIONS.length)];
-    const systemPrompt = [
-      SYSTEM_PROMPT,
-      app.context ? `App context:\n${app.context}` : null,
-      `SELECTED ANGLE FOR THIS DRAFT:\nAngle: ${angle.angle}\nVisual vibe: ${angle.vibe}\nVisual: ${angle.visual}\nPacing: ${angle.pacing}`,
-      `SELECTED FORMAT FOR THIS DRAFT:\nFormat: ${format}`,
-      `SELECTED DURATION FOR THIS DRAFT (seconds): ${duration}`,
-    ]
-      .filter((part): part is string => Boolean(part))
-      .join('\n\n');
+async function generateAttempt(
+  apiKey: string,
+  model: string,
+  appName: string,
+  profile: ProfileJson,
+  profileJson: string,
+  selection: Selection,
+  bannedWords: string[],
+): Promise<
+  | { kind: 'skip'; reason: string; tokens: number; completion: number }
+  | { kind: 'ok'; attempt: Attempt }
+> {
+  const persona = profile.personas.find((p) => p.id === selection.personaId);
+  const feature = profile.features.find((f) => f.id === selection.featureId);
+  const userPrompt = fillTemplate(
+    selection.format,
+    profileJson,
+    selection,
+    persona,
+    feature,
+    appName,
+  );
+  const systemPrompt = `${SYSTEM_PROMPT}\n\n${ADDENDUM}`;
+  const schema = SCHEMAS[selection.format.igFormat];
 
-    const generated = await generateWithOpenAI(apiKey, model, systemPrompt, type);
-    const draft = toContentDraft(generated);
+  let tokens = 0;
+  let completion = 0;
+  let problems: string[] = [];
 
-    const { data, errors } = await client.models.Content.create({
-      appId,
-      status: 'DRAFT',
-      title: draft.title,
-      type: draft.type,
-      caption: draft.caption,
-      hashtags: draft.hashtags,
-      videoKeywords: draft.videoKeywords,
-      targetPersona: draft.targetPersona,
-      relatabilityHook: draft.relatabilityHook,
-      angel: draft.angel,
-      overlayText: draft.overlayText,
-      videoConfigurations: draft.videoConfigurations,
-      audioConfig: draft.audioConfig,
+  for (let round = 0; round < 2; round += 1) {
+    const prompt = problems.length
+      ? `${userPrompt}\n\nYour previous answer failed these checks. Fix them:\n- ${problems.join('\n- ')}`
+      : userPrompt;
+    const started = Date.now();
+    log('openai.request', {
+      formatId: selection.format.id,
+      round,
+      model,
+      promptChars: prompt.length,
+    });
+    const result = await callOpenAi(apiKey, model, systemPrompt, prompt, schema);
+    tokens += result.promptTokens;
+    completion += result.completionTokens;
+    log('openai.response', {
+      formatId: selection.format.id,
+      round,
+      ms: Date.now() - started,
+      promptTokens: result.promptTokens,
+      completionTokens: result.completionTokens,
     });
 
-    if (errors?.length) {
-      return jsonResponse(502, { message: errors[0].message });
-    }
-    if (!data) {
-      return jsonResponse(502, { message: 'Failed to save draft.' });
+    const skip = (result.payload as { skip?: string }).skip?.trim();
+    if (skip) {
+      log('openai.skip', { formatId: selection.format.id, reason: skip });
+      return { kind: 'skip', reason: skip, tokens, completion };
     }
 
-    return jsonResponse(200, data);
+    problems = [
+      ...validatePayload(selection.format, result.payload, bannedWords),
+      ...findInventedFacts(selection.format, result.payload, profileJson),
+    ];
+    log('validation', {
+      formatId: selection.format.id,
+      round,
+      ok: problems.length === 0,
+      problems: problems.slice(0, 6),
+    });
+    if (!problems.length) {
+      return {
+        kind: 'ok',
+        attempt: {
+          selection,
+          payload: result.payload,
+          promptTokens: tokens,
+          completionTokens: completion,
+        },
+      };
+    }
+  }
+
+  throw new HttpError(
+    422,
+    `Draft failed validation after a retry: ${problems.slice(0, 3).join('; ')}`,
+  );
+}
+
+async function fetchAssets(
+  format: FormatEntry,
+  payload: GeneratedPayload,
+): Promise<Array<StockAsset & { beatIndex: number }>> {
+  const out: Array<StockAsset & { beatIndex: number }> = [];
+
+  if (format.igFormat === 'REEL') {
+    const reel = payload as ReelPayload;
+    for (const [index, beat] of reel.beats.entries()) {
+      const asset = await findAsset(beat.visual_query, 'VIDEO', beat.seconds);
+      log('stock.video', {
+        beat: index,
+        query: beat.visual_query,
+        found: asset !== null,
+      });
+      if (!asset) {
+        throw new HttpError(
+          502,
+          `No stock video found for "${beat.visual_query}".`,
+        );
+      }
+      out.push({ ...asset, beatIndex: index });
+    }
+  } else if (format.igFormat === 'CAROUSEL') {
+    const carousel = payload as CarouselPayload;
+    for (const [index, slide] of carousel.slides.entries()) {
+      if (!slide.visual.trim()) continue;
+      const asset = await findAsset(slide.visual, 'IMAGE');
+      log('stock.image', {
+        slide: index,
+        query: slide.visual,
+        found: asset !== null,
+      });
+      if (asset) out.push({ ...asset, beatIndex: index });
+    }
+  } else if (format.igFormat === 'IMAGE') {
+    const image = payload as ImagePayload;
+    if (image.visual.trim()) {
+      const asset = await findAsset(image.visual, 'IMAGE');
+      if (asset) out.push({ ...asset, beatIndex: 0 });
+    }
+  }
+
+  return out;
+}
+
+function contentType(format: FormatEntry): ContentTypeValue {
+  switch (format.igFormat) {
+    case 'REEL':
+      return 'SHORT_FORM_VIDEO';
+    case 'CAROUSEL':
+      return 'CAROUSEL';
+    case 'IMAGE':
+      return format.isMeme ? 'MEME' : 'SINGLE_IMAGE';
+    case 'STORY':
+      return 'TEXT_POST';
+  }
+}
+
+interface PieceFields {
+  title: string;
+  caption: string | null;
+  hashtags: string[];
+  scriptJson: string;
+  overlayText: string | null;
+  videoKeywords: string[];
+  videoConfigurations: string | null;
+}
+
+function unifyReel(payload: ReelPayload): void {
+  if (!payload.beats.length) return;
+  const lastIndex = payload.beats.length - 1;
+  if (payload.hook.trim()) payload.beats[0].text = payload.hook.trim();
+  if (lastIndex > 0 && payload.cta.trim()) {
+    payload.beats[lastIndex].text = payload.cta.trim();
+  }
+  payload.hook = payload.beats[0].text;
+  payload.cta = payload.beats[lastIndex].text;
+  (payload as ReelPayload & { unified?: boolean }).unified = true;
+}
+
+function toPieceFields(format: FormatEntry, payload: GeneratedPayload): PieceFields {
+  if (format.igFormat === 'REEL') unifyReel(payload as ReelPayload);
+  const script = JSON.stringify({
+    schema: format.igFormat,
+    formatId: format.id,
+    formatName: format.name,
+    textStyle: pickRandom(TEXT_STYLE_KEYS),
+    layout: format.layout,
+    payload,
+  });
+
+  if (format.igFormat === 'REEL') {
+    const reel = payload as ReelPayload;
+    let cursor = 0;
+    const timeline = reel.beats.map((beat, index) => {
+      const start = cursor;
+      cursor += beat.seconds;
+      return {
+        segment_id: index + 1,
+        text: beat.text,
+        start_time_sec: start,
+        end_time_sec: cursor,
+        duration_sec: beat.seconds,
+      };
+    });
+    return {
+      title: reel.hook,
+      caption: reel.caption,
+      hashtags: reel.hashtags,
+      scriptJson: script,
+      overlayText: JSON.stringify({ overlay_text_timeline: timeline }),
+      videoKeywords: reel.beats.map((b) => b.visual_query),
+      videoConfigurations: JSON.stringify({
+        duration: Math.min(20, Math.max(1, cursor)),
+        search_keywords: reel.beats.map((b) => b.visual_query),
+        orientation: 'portrait',
+      }),
+    };
+  }
+
+  if (format.igFormat === 'CAROUSEL') {
+    const carousel = payload as CarouselPayload;
+    return {
+      title: carousel.slides[0]?.headline || format.name,
+      caption: carousel.caption,
+      hashtags: carousel.hashtags,
+      scriptJson: script,
+      overlayText: null,
+      videoKeywords: [],
+      videoConfigurations: null,
+    };
+  }
+
+  if (format.igFormat === 'IMAGE') {
+    const image = payload as ImagePayload;
+    return {
+      title: image.text_lines[0] || format.name,
+      caption: image.caption,
+      hashtags: image.hashtags,
+      scriptJson: script,
+      overlayText: null,
+      videoKeywords: [],
+      videoConfigurations: null,
+    };
+  }
+
+  const story = payload as { frames: Array<{ text: string }>; caption_note: string };
+  return {
+    title: story.frames[0]?.text || format.name,
+    caption: story.caption_note,
+    hashtags: [],
+    scriptJson: script,
+    overlayText: null,
+    videoKeywords: [],
+    videoConfigurations: null,
+  };
+}
+
+async function readUsage(
+  client: DataClient,
+  appId: string,
+  date: string,
+): Promise<number> {
+  const { data, errors } = await client.models.DailyUsage.get({
+    id: `${appId}#${date}`,
+  });
+  logGqlErrors('DailyUsage.get', errors);
+  return data?.count ?? 0;
+}
+
+async function bumpUsage(
+  client: DataClient,
+  appId: string,
+  date: string,
+  owner: string,
+  current: number,
+): Promise<number> {
+  const id = `${appId}#${date}`;
+  const next = current + 1;
+  if (current === 0) {
+    const { errors } = await client.models.DailyUsage.create({
+      id,
+      appId,
+      date,
+      count: next,
+      owner,
+    });
+    logGqlErrors('DailyUsage.create', errors);
+    if (errors?.length) {
+      const updated = await client.models.DailyUsage.update({ id, count: next });
+      logGqlErrors('DailyUsage.update', updated.errors);
+    }
+  } else {
+    const updated = await client.models.DailyUsage.update({ id, count: next });
+    logGqlErrors('DailyUsage.update', updated.errors);
+  }
+  return next;
+}
+
+async function writeLog(
+  client: DataClient,
+  owner: string,
+  entry: {
+    appId: string;
+    pieceId?: string;
+    formatId?: number;
+    model: string;
+    tokens: number;
+    completionTokens: number;
+    startedAt: number;
+    outcome: 'OK' | 'SKIPPED' | 'FAILED';
+    error?: string;
+  },
+): Promise<void> {
+  const created = await client.models.GenerationLog.create({
+    appId: entry.appId,
+    pieceId: entry.pieceId,
+    formatId: entry.formatId,
+    model: entry.model,
+    tokens: entry.tokens + entry.completionTokens,
+    cost: estimateCost(entry.model, entry.tokens, entry.completionTokens) ?? undefined,
+    durationMs: Date.now() - entry.startedAt,
+    outcome: entry.outcome,
+    error: entry.error,
+    owner,
+  });
+  logGqlErrors('GenerationLog.create', created.errors);
+}
+
+interface RunInput {
+  client: DataClient;
+  owner: string;
+  appId: string;
+  localDate: string;
+  forced?: Selection;
+  replacePieceId?: string;
+}
+
+async function runGeneration(input: RunInput) {
+  const { client, owner, appId, localDate } = input;
+
+  log('run.start', {
+    appId,
+    localDate,
+    regenerate: Boolean(input.replacePieceId),
+    forced: Boolean(input.forced),
+  });
+
+  const { data: app, errors: appErrors } = await client.models.Apps.get({
+    id: appId,
+  });
+  const appErrorMessage = logGqlErrors('Apps.get', appErrors);
+  if (!app) {
+    throw new HttpError(
+      404,
+      appErrorMessage
+        ? `Could not load app: ${appErrorMessage}`
+        : `App ${appId} not found.`,
+    );
+  }
+  log('app.loaded', {
+    hasOwner: Boolean(app.owner),
+    ownerMatches: app.owner ? ownerMatches(app.owner, owner) : null,
+    hasDescription: Boolean(app.description?.trim()),
+  });
+  if (!app.owner) {
+    const adopted = await client.models.Apps.update({ id: appId, owner });
+    if (adopted.errors?.length) {
+      throw new HttpError(
+        500,
+        `Could not assign owner: ${adopted.errors[0].message}`,
+      );
+    }
+  } else if (!ownerMatches(app.owner, owner)) {
+    console.warn('App owner mismatch', {
+      appId,
+      storedShape: app.owner.includes('::') ? 'sub::username' : 'other',
+    });
+    throw new HttpError(403, 'Not your app.');
+  }
+
+  const profileRows = await client.models.AppProfile.list({
+    filter: { appId: { eq: appId } },
+  });
+  logGqlErrors('AppProfile.list', profileRows.errors);
+  const profile = parseProfile(profileRows.data[0]);
+  const missing = missingProfileFields(app.description, profile);
+  log('profile.loaded', {
+    found: profileRows.data.length > 0,
+    personas: profile.personas.length,
+    features: profile.features.length,
+    missing,
+  });
+  if (missing.length) {
+    throw new HttpError(
+      422,
+      `Complete the profile first. Missing: ${missing.join(', ')}.`,
+    );
+  }
+
+  const used = await readUsage(client, appId, localDate);
+  log('usage', { used, limit: DAILY_LIMIT });
+  if (used >= DAILY_LIMIT) {
+    throw new HttpError(
+      429,
+      `Daily limit of ${DAILY_LIMIT} generations reached. It resets at midnight.`,
+    );
+  }
+
+  const apiKey = await loadOpenAiKey();
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  log('openai.key.loaded', { model, pexelsParamSet: Boolean(process.env.PEXELS_API_KEY_PARAM) });
+  const profileJson = JSON.stringify(profile);
+  const bannedWords = parseBannedWords(profile.voice);
+  const recent = await recentPicks(client, appId);
+
+  const personas = profile.personas.filter((p) => p.name?.trim());
+  const features = profile.features.filter((f) => f.name?.trim());
+
+  let attempt: Attempt | null = null;
+  const tried = new Set<number>();
+
+  for (let draw = 0; draw <= MAX_SKIP_REDRAWS && !attempt; draw += 1) {
+    let selection = input.forced;
+    if (!selection || draw > 0) {
+      const eligible = FORMATS.filter(
+        (f) => !tried.has(f.id) && inputsSatisfied(f, profile),
+      );
+      if (!eligible.length) {
+        throw new HttpError(422, 'No format fits the current profile.');
+      }
+      const pool = input.forced
+        ? eligible.filter((f) => f.igFormat === input.forced?.format.igFormat)
+        : eligible;
+      const format = pickRandom(pool.length ? pool : eligible);
+      selection = {
+        format,
+        personaId:
+          input.forced?.personaId ??
+          pickAvoiding(
+            personas.map((p) => p.id),
+            recent.personas,
+          ),
+        featureId:
+          input.forced?.featureId ??
+          pickAvoiding(
+            features.map((f) => f.id),
+            recent.features,
+          ),
+        pillar:
+          input.forced?.pillar ?? pickAvoiding(PILLARS, recent.pillars),
+      };
+    }
+    tried.add(selection.format.id);
+    log('selection', {
+      draw,
+      formatId: selection.format.id,
+      formatName: selection.format.name,
+      igFormat: selection.format.igFormat,
+      pillar: selection.pillar,
+    });
+
+    const startedAt = Date.now();
+    try {
+      const result = await generateAttempt(
+        apiKey,
+        model,
+        app.name,
+        profile,
+        profileJson,
+        selection,
+        bannedWords,
+      );
+      if (result.kind === 'skip') {
+        await writeLog(client, owner, {
+          appId,
+          formatId: selection.format.id,
+          model,
+          tokens: result.tokens,
+          completionTokens: result.completion,
+          startedAt,
+          outcome: 'SKIPPED',
+          error: result.reason,
+        });
+        continue;
+      }
+      attempt = result.attempt;
+    } catch (error) {
+      await writeLog(client, owner, {
+        appId,
+        formatId: selection.format.id,
+        model,
+        tokens: 0,
+        completionTokens: 0,
+        startedAt,
+        outcome: 'FAILED',
+        error: describeError(error),
+      });
+      throw error;
+    }
+  }
+
+  if (!attempt) {
+    throw new HttpError(
+      422,
+      'Could not produce a piece: the profile is missing facts for the drawn formats.',
+    );
+  }
+
+  const { format } = attempt.selection;
+  const assets = await fetchAssets(format, attempt.payload);
+  log('assets.fetched', { count: assets.length, igFormat: format.igFormat });
+  const fields = toPieceFields(format, attempt.payload);
+
+  const common = {
+    title: fields.title,
+    type: contentType(format),
+    igFormat: format.igFormat,
+    formatId: format.id,
+    personaId: attempt.selection.personaId,
+    featureId: attempt.selection.featureId,
+    pillar: attempt.selection.pillar,
+    scriptJson: fields.scriptJson,
+    caption: fields.caption ?? undefined,
+    hashtags: fields.hashtags,
+    overlayText: fields.overlayText ?? undefined,
+    videoKeywords: fields.videoKeywords,
+    videoConfigurations: fields.videoConfigurations ?? undefined,
+    status: 'DRAFT' as const,
+  };
+
+  let piece: ContentRow | null;
+  if (input.replacePieceId) {
+    const old = await client.models.Content.get({ id: input.replacePieceId });
+    const oldAssets = await client.models.Asset.list({
+      filter: { pieceId: { eq: input.replacePieceId } },
+    });
+    await Promise.all(
+      oldAssets.data.map((a) => client.models.Asset.delete({ id: a.id })),
+    );
+    const updated = await client.models.Content.update({
+      id: input.replacePieceId,
+      ...common,
+      regenCount: (old.data?.regenCount ?? 0) + 1,
+    });
+    const updateError = logGqlErrors('Content.update', updated.errors);
+    if (updateError) throw new HttpError(502, `Failed to update draft: ${updateError}`);
+    piece = updated.data;
+  } else {
+    const created = await client.models.Content.create({
+      appId,
+      owner,
+      regenCount: 0,
+      ...common,
+    });
+    const createError = logGqlErrors('Content.create', created.errors);
+    if (createError) throw new HttpError(502, `Failed to save draft: ${createError}`);
+    piece = created.data;
+  }
+  if (!piece) throw new HttpError(502, 'Failed to save draft.');
+  log('piece.saved', { pieceId: piece.id });
+
+  if (assets.length) {
+    log('asset.create', {
+      count: assets.length,
+      keys: [
+        'pieceId',
+        'source',
+        'sourceUrl',
+        'licence',
+        'type',
+        'beatIndex',
+        'url',
+        'previewUrl',
+        'query',
+        'owner',
+      ],
+    });
+  }
+  for (const asset of assets) {
+    const createdAsset = await client.models.Asset.create({
+      pieceId: piece.id,
+      source: asset.source,
+      sourceUrl: asset.sourceUrl,
+      licence: asset.licence,
+      type: asset.type,
+      beatIndex: asset.beatIndex,
+      url: asset.url,
+      previewUrl: asset.previewUrl,
+      query: asset.query,
+      owner,
+    });
+    const assetError = logGqlErrors('Asset.create', createdAsset.errors);
+    if (assetError) {
+      throw new HttpError(502, `Failed to save asset: ${assetError}`);
+    }
+  }
+
+  await writeLog(client, owner, {
+    appId,
+    pieceId: piece.id,
+    formatId: format.id,
+    model,
+    tokens: attempt.promptTokens,
+    completionTokens: attempt.completionTokens,
+    startedAt: Date.now(),
+    outcome: 'OK',
+  });
+
+  const nextUsed = await bumpUsage(client, appId, localDate, owner, used);
+  log('run.done', { pieceId: piece.id, used: nextUsed });
+  return { piece, used: nextUsed, limit: DAILY_LIMIT };
+}
+
+async function createClient(): Promise<DataClient> {
+  const { resourceConfig, libraryOptions } = await getAmplifyDataClientConfig(
+    process.env as unknown as Parameters<typeof getAmplifyDataClientConfig>[0],
+  );
+  Amplify.configure(resourceConfig, libraryOptions);
+  log('client.configured');
+  return generateClient<Schema>();
+}
+
+async function handleGenerate(event: ApiEvent): Promise<ApiResult> {
+  const body = readBody(event);
+  const owner = callerOwner(event);
+  const client = await createClient();
+  const result = await runGeneration({
+    client,
+    owner,
+    appId: requireString(body, 'appId'),
+    localDate: requireLocalDate(body),
+  });
+  return jsonResponse(200, result);
+}
+
+async function handleRegenerate(event: ApiEvent): Promise<ApiResult> {
+  const body = readBody(event);
+  const owner = callerOwner(event);
+  const client = await createClient();
+  const pieceId = requireString(body, 'pieceId');
+
+  const { data: piece } = await client.models.Content.get({ id: pieceId });
+  if (!piece) throw new HttpError(404, 'Piece not found.');
+  if (!piece.owner || !ownerMatches(piece.owner, owner)) {
+    throw new HttpError(403, 'Not your content.');
+  }
+  if (piece.status === 'APPROVED') {
+    throw new HttpError(409, 'Approved pieces cannot be regenerated.');
+  }
+
+  const format = piece.formatId ? getFormat(piece.formatId) : undefined;
+  if (!format || !piece.personaId || !piece.featureId || !piece.pillar) {
+    throw new HttpError(422, 'This piece has no generation history.');
+  }
+
+  const result = await runGeneration({
+    client,
+    owner,
+    appId: piece.appId,
+    localDate: requireLocalDate(body),
+    replacePieceId: piece.id,
+    forced: {
+      format,
+      personaId: piece.personaId,
+      featureId: piece.featureId,
+      pillar: piece.pillar,
+    },
+  });
+  return jsonResponse(200, result);
+}
+
+async function handleStockSearch(event: ApiEvent): Promise<ApiResult> {
+  callerOwner(event);
+  const body = readBody(event);
+  const query = requireString(body, 'query');
+  const type = body.type === 'IMAGE' ? 'IMAGE' : 'VIDEO';
+  const page =
+    typeof body.page === 'number' && body.page >= 1 ? Math.floor(body.page) : 1;
+  const minSeconds =
+    typeof body.minSeconds === 'number' && body.minSeconds > 0
+      ? body.minSeconds
+      : 0;
+  const results =
+    type === 'VIDEO'
+      ? await searchVideos(query, page, minSeconds)
+      : await searchImages(query, page);
+  return jsonResponse(200, { results });
+}
+
+/**
+ * HTTP API behind a Cognito JWT authorizer.
+ * - POST /content/generate   { appId, localDate }
+ * - POST /content/regenerate { pieceId, localDate }
+ * - POST /content/stock-search { query, type, page?, minSeconds? }
+ */
+export const handler = async (event: ApiEvent): Promise<ApiResult> => {
+  try {
+    const path = event.rawPath ?? '';
+    const claims = event.requestContext?.authorizer?.jwt?.claims ?? {};
+    log('request', {
+      path,
+      hasBody: Boolean(event.body),
+      claimKeys: Object.keys(claims),
+      hasSub: typeof claims.sub === 'string',
+      hasUsername:
+        typeof claims.username === 'string' ||
+        typeof claims['cognito:username'] === 'string',
+      tokenUse: claims.token_use,
+    });
+    if (path.endsWith('/content/generate')) return await handleGenerate(event);
+    if (path.endsWith('/content/regenerate')) {
+      return await handleRegenerate(event);
+    }
+    if (path.endsWith('/content/stock-search')) {
+      return await handleStockSearch(event);
+    }
+    return jsonResponse(404, { message: 'Not found.' });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Internal error.';
-    return jsonResponse(500, { message });
+    if (error instanceof HttpError) {
+      return jsonResponse(error.status, { message: error.message });
+    }
+    console.error(
+      JSON.stringify({
+        scope: 'generate-content',
+        step: 'failed',
+        message: describeError(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      }),
+    );
+    return jsonResponse(500, { message: describeError(error) });
   }
 };

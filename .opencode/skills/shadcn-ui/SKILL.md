@@ -1,6 +1,6 @@
 ---
 name: shadcn-ui
-description: Use when adding or styling UI in this app — "add a dialog/table/select/form", "install a shadcn component", "style this button/input", "use the design system". Covers the radix-nova shadcn CLI, the cn() helper, and DESIGN.md token rules (black pills, hairlines, no shadows or accents).
+description: Use when adding or styling UI in this app — "add a dialog/table/select/form", "install a shadcn component", "style this button/input", "use the design system". Covers the radix-nova shadcn CLI, the cn() helper, and DESIGN.md token rules (ink pill buttons, hairlines, no saturated accent, soft single shadow tier).
 ---
 
 # shadcn/ui + design tokens
@@ -32,13 +32,15 @@ npx shadcn@latest add dialog -o -y
 
 - Prefer tokens: `bg-canvas`, `bg-background`, `text-ink`, `text-ink-soft`,
   `text-graphite`, `text-slate`, `text-ash`, `border-hairline`,
-  `border-hairline-soft`, `bg-surface-cool`, `rounded-xs|sm|md|lg`.
+  `border-hairline-soft`, `bg-surface-strong`, `rounded-xs|sm|md|lg`.
 - Typography utilities: `text-display`, `text-heading-lg|md|sm`, `eyebrow`,
   `micro-caps`, `section-y`.
-- Buttons are **black pills** (`rounded-full`, `h-10 px-6`, `font-semibold`) —
-  the `Button` primitive already does this. Keep it.
-- **Never** add accent colours, gradients, or drop shadows. Cards use
-  `shadow-none` with hairline borders (see `Apps.tsx`).
+- Buttons are ink pills (`rounded-full`, `h-10 px-6`, `font-medium`); the
+  `Button` primitive already does this. Keep it. Outline = transparent with a
+  hairline-strong border. Badges and tags are pills.
+- **Never** add a saturated action colour or put gradients on controls. Cards
+  use `bg-surface-card shadow-none` with hairline borders, `rounded-xl` (see
+  `Apps.tsx`).
 
 ## Icons
 

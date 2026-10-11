@@ -1,14 +1,7 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
 import { generateContentFn } from '../functions/generate-content/resource';
 
-const ContentStatus = a.enum([
-  'DRAFT',
-  'READY',
-  'RENDERING',
-  'SCHEDULED',
-  'PUBLISHED',
-  'FAILED',
-]);
+const ContentStatus = a.enum(['DRAFT', 'APPROVED', 'DISCARDED']);
 
 const ContentType = a.enum([
   'SHORT_FORM_VIDEO',
@@ -18,36 +11,112 @@ const ContentType = a.enum([
   'TEXT_POST',
 ]);
 
+const IgFormat = a.enum(['REEL', 'CAROUSEL', 'IMAGE', 'STORY']);
+
+const Pillar = a.enum(['PAIN', 'HOW_TO', 'RESULT', 'MYTH', 'IDENTITY']);
+
+const AssetType = a.enum(['VIDEO', 'IMAGE']);
+
+const GenerationOutcome = a.enum(['OK', 'SKIPPED', 'FAILED']);
+
 const schema = a.schema({
   Apps: a
     .model({
+      owner: a.string(),
       name: a.string().required(),
       logo: a.string(),
       description: a.string(),
       context: a.string(),
       contents: a.hasMany('Content', 'appId'),
+      profile: a.hasOne('AppProfile', 'appId'),
     })
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.ownerDefinedIn('owner')]),
+
+  AppProfile: a
+    .model({
+      owner: a.string(),
+      appId: a.id().required(),
+      app: a.belongsTo('Apps', 'appId'),
+      personas: a.json(),
+      features: a.json(),
+      voice: a.json(),
+      proof: a.json(),
+      competitors: a.json(),
+      brand: a.json(),
+      storeUrl: a.string(),
+      ctaText: a.string(),
+    })
+    .authorization((allow) => [allow.ownerDefinedIn('owner')]),
 
   Content: a
     .model({
+      owner: a.string(),
       status: ContentStatus,
       title: a.string().required(),
-      postedOn: a.datetime(),
-      angel: a.string(),
       appId: a.id().required(),
       app: a.belongsTo('Apps', 'appId'),
+      type: ContentType,
+      formatId: a.integer(),
+      igFormat: IgFormat,
+      personaId: a.string(),
+      featureId: a.string(),
+      pillar: Pillar,
+      scriptJson: a.json(),
+      caption: a.string(),
+      hashtags: a.string().array(),
+      regenCount: a.integer(),
+      approvedAt: a.datetime(),
+      assets: a.hasMany('Asset', 'pieceId'),
+      postedOn: a.datetime(),
+      angel: a.string(),
       relatabilityHook: a.string(),
       overlayText: a.json(),
       videoKeywords: a.string().array(),
       videoConfigurations: a.json(),
       audioConfig: a.json(),
-      caption: a.string(),
-      hashtags: a.string().array(),
       targetPersona: a.string(),
-      type: ContentType,
     })
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.ownerDefinedIn('owner')]),
+
+  Asset: a
+    .model({
+      owner: a.string(),
+      pieceId: a.id().required(),
+      piece: a.belongsTo('Content', 'pieceId'),
+      source: a.string().required(),
+      sourceUrl: a.string(),
+      licence: a.string(),
+      type: AssetType,
+      beatIndex: a.integer(),
+      url: a.string().required(),
+      previewUrl: a.string(),
+      query: a.string(),
+    })
+    .authorization((allow) => [allow.ownerDefinedIn('owner')]),
+
+  GenerationLog: a
+    .model({
+      owner: a.string(),
+      appId: a.id().required(),
+      pieceId: a.id(),
+      formatId: a.integer(),
+      model: a.string(),
+      tokens: a.integer(),
+      cost: a.float(),
+      durationMs: a.integer(),
+      outcome: GenerationOutcome,
+      error: a.string(),
+    })
+    .authorization((allow) => [allow.ownerDefinedIn('owner')]),
+
+  DailyUsage: a
+    .model({
+      owner: a.string(),
+      appId: a.id().required(),
+      date: a.string().required(),
+      count: a.integer().required(),
+    })
+    .authorization((allow) => [allow.ownerDefinedIn('owner')]),
 })
 .authorization((allow) => [allow.resource(generateContentFn)]);
 

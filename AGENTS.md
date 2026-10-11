@@ -8,7 +8,7 @@ making changes. Keep it accurate: update it when the stack changes.
 A production-ready React SPA: **Vite + React 19 + TypeScript**, **Tailwind
 CSS v4**, **shadcn/ui**, **React Router**, **Amplify Gen2** (auth, data,
 storage), and a **PWA** service worker. The visual language follows
-`DESIGN.md` (Runwai-derived, monochrome editorial).
+`DESIGN.md` (ElevenLabs-derived: off-white canvas, ink pills, light serif display).
 
 ## Commands
 
@@ -27,23 +27,50 @@ storage), and a **PWA** service worker. The visual language follows
 ## Hard rules (do not violate)
 
 1. **Never deploy or push to AWS on your own initiative.** No `ampx sandbox`,
-   `ampx deploy`, `ampx pipeline-deploy`, or any command that creates/updates
-   cloud resources unless the user explicitly asks. Initialising/editing local
+   `ampx deploy`, `ampx pipeline-deploy`, `cdk deploy`, `npm run infra:*`,
+   `npm run deploy:web`, `npm run backend:bootstrap`,
+   `npm run backend:deploy:prod`, or any command that creates/updates cloud
+   resources
+   unless the user explicitly asks. Initialising/editing local
    `amplify/` files is fine. There is **no CI/pipeline configured**; the user
    deploys backend and frontend manually. Do not add deploy scripts or assume
    a pipeline exists. State clearly what any deploy would affect before it
    runs.
 2. If AWS credentials are ever needed, the user uses
-   `export AWS_PROFILE=jaygangani`. Never commit credentials or write them to
-   files.
+   `export AWS_PROFILE=jaygangani`. Claude Code sessions get it from
+   `.claude/settings.json` (`env`); the profile name only, never keys. Never
+   commit credentials or write them to files.
 3. **Never commit secrets.** Never log tokens, keys, or `amplify_outputs.json`
    contents that contain live identifiers.
 4. Do not add comments to code unless the user asks. JSDoc on exported
    public modules is the only exception; match existing style.
-5. Do not introduce accent colours, drop shadows, or gradients — see
-   `DESIGN.md` (monochrome + photography only). Buttons stay black pills.
+5. Follow `DESIGN.md`: off-white `canvas` floor, white `surface-card` cards
+   with hairlines, no gradients on controls, display type is the serif at
+   weight 300 (`text-display*`, `text-heading-*`), never bold. `primary` is
+   the ink pill and the only action colour; no saturated accent. Buttons and
+   badges are pills (`rounded-full`), cards `rounded-xl`, inputs `rounded-md`.
+   Pastel `gradient-*` tokens are atmosphere only (`.orb` utilities), never
+   fills for buttons, text or card surfaces. At most one soft shadow tier
+   (`--shadow-soft`, hovered cards).
 6. Do not edit `src/components/ui/*` primitives to change app behaviour;
    style at the usage site or via theme tokens.
+
+7. Do not read or print `.env.local` or `amplify_outputs.json`; they hold
+   live identifiers. Reference variable names only.
+8. Do not `git push` or commit unless the user asks. Never add
+   `Co-Authored-By` or any AI attribution trailer to commits or PR bodies.
+
+## Agent tooling
+
+- `CLAUDE.md` imports this file; keep rules here, not there.
+- `.claude/settings.json` (shared) allows build/dev commands and denies
+  `ampx`, `aws`, `git push`, and reads of secret files. Personal overrides go
+  in `.claude/settings.local.json` (git-ignored).
+- Project skills live in `.opencode/skills/` (`add-page`, `amplify-data`,
+  `design-system`, `shadcn-ui`); `.claude/skills` symlinks to it. Use them
+  for the matching task instead of re-deriving patterns.
+- `docs/` holds product specs (FRDs, content-format research). Read the
+  relevant one before changing content generation behaviour.
 
 ## Conventions
 
@@ -71,15 +98,26 @@ src/
   components/
     ui/          shadcn primitives (generated — do not hand-edit)
     common/      app shell: AppHeader
-    features/    domain components (e.g. AppLogo)
-  hooks/         useTheme, useThemeContext
-  lib/           utils.ts (cn), amplify.ts (configure + dataClient)
-  pages/         Home, Apps, Login, NotFound
+    features/    domain components (AppLogo, AppConfigPanel, ProfilePanel,
+                 ContentPanel, PiecePreview, PieceEditor)
+  hooks/         useTheme, useThemeContext, useSwipe
+  lib/           utils.ts (cn), amplify.ts (configure + dataClient),
+                 overlayText.ts (overlay fonts, canvas text burn-in),
+                 render.ts (frames + drawFrame, shared by preview/export),
+                 profile.ts (min-field gate), export/ (mp4, png, zip, caption)
+  pages/         Home, Apps, AppDetail, ContentDetail, Feed, Login, NotFound
   routes/        index.tsx — lazy routes + ProtectedShell
-  services/      apps.ts (CRUD), storage.ts (S3), http.ts
-  types/         shared API/theme types
+  services/      apps.ts, profile.ts, content.ts (CRUD, generate,
+                 regenerate, stock search, usage), assets.ts, storage.ts
+                 (S3), http.ts
+  types/         shared API/content/profile/script/theme types
+scripts/         build-formats.ts (docs 72-formats md → formats.json),
+                 deploy.mjs + write-env-deploy.mjs (S3/CloudFront),
+                 backend-bootstrap.sh + backend-deploy.sh (prod backend)
+infra/           CDK stack for web hosting (own package.json)
   context/       React context providers
-  styles/        theme.css (DESIGN.md tokens via @theme) + globals
+  styles/        theme.css (DESIGN.md tokens via @theme) + globals; fonts: Inter
+                 (body) + Newsreader (Waldenburg substitute, display)
 ```
 
 ## Stack specifics
@@ -97,51 +135,68 @@ src/
   Unauthenticated redirects pass `state.from`; `LoginPage` returns there.
 - **Amplify** — `src/lib/amplify.ts` runs `Amplify.configure(amplify_outputs.json)`
   and exports the typed `dataClient`. Backend is defined in `amplify/`
-  (`auth`, `data` with the `Apps`/`Content` models, `storage` `media/*`,
+  (`auth`, `data` with the `Apps`/`AppProfile`/`Content` models etc., `storage` `media/*`,
   function `generate-content`). `amplify_outputs.json` is generated/refreshed
   only by deploy/sandbox.
-- **AI draft generation (Lambda + HTTP API)** — function
+- **Content generation (Lambda + HTTP API)** — function
   `amplify/functions/generate-content/` (in `defineBackend`, **not** AppSync).
-  Exposed as **`POST /content/generate`** on an API Gateway **HTTP API** with
-  **Cognito User Pool JWT authorizer** (authenticated/logged-in users only;
-  Bearer access token required). Endpoint base URL is written to
-  `amplify_outputs.json` → `custom.GENERATE_CONTENT_API_URL`. Frontend:
-  `generateContentDraft()` in `src/services/content.ts` (uses
-  `fetchAuthSession()`). `SYSTEM_PROMPT` and `USER_PROMPT` are constants in
-  the Lambda; the system prompt is extended with the app's `context` field
-  (Apps model, set in App Configurations) as reference. **API key from SSM**
-  param `OPENAI_API_KEY_PARAM`
-  (default `/mycontentstudio/openai/api-key`); model is function env
-  `OPENAI_MODEL` (default `gpt-4o-mini` — not in SSM). Lambda has
-  `ssm:GetParameter` (granted in `amplify/backend.ts`). Creates a row on
-  existing `Content` with `status: DRAFT`. Create the SSM parameter before
-  running it. No deploy without user ask.
+  One Lambda behind an API Gateway **HTTP API** with a **Cognito User Pool
+  JWT authorizer**; routes `POST /content/generate`, `/content/regenerate`,
+  `/content/stock-search`. Base URL is in `amplify_outputs.json` →
+  `custom.GENERATE_CONTENT_API_URL`; frontend calls live in
+  `src/services/content.ts`. Modules: `catalog.ts` (72 formats from
+  `formats.json`, input gating, picks), `schemas.ts` (4 strict JSON schemas),
+  `validate.ts` (FR-3.4 checks + invented-fact check), `stock.ts` (Pexels),
+  `openai.ts`, `handler.ts` (pipeline: profile gate → daily limit → pick →
+  prompt → validate/retry/skip → stock → write). Regenerate `formats.json`
+  with `npx tsx scripts/build-formats.ts` after editing
+  `docs/72-short-form-content-formats (2).md`. The Lambda sets `owner`
+  (`sub::username` from the JWT) on every row it writes, otherwise
+  `allow.owner()` hides it from the user. Limit is 5 per app per
+  user-local day (`DailyUsage`, id `appId#YYYY-MM-DD`). **SSM params:**
+  `OPENAI_API_KEY_PARAM` (`/mycontentstudio/openai/api-key`) and
+  `PEXELS_API_KEY_PARAM` (`/mycontentstudio/pexels/api-key`); model is env
+  `OPENAI_MODEL` (default `gpt-4o-mini`). Create both parameters before
+  running. No deploy without user ask.
+- **Data model** — `Apps`, `AppProfile` (structured JSON: personas, features,
+  voice, proof, competitors, brand, storeUrl, ctaText), `Content` (a piece:
+  status `DRAFT|APPROVED|DISCARDED`, `formatId`, `igFormat`, `personaId`,
+  `featureId`, `pillar`, `scriptJson`, `regenCount`, `approvedAt`; legacy
+  overlay/video/audio fields are unused), `Asset` (stock media with source +
+  licence per beat), `GenerationLog`, `DailyUsage`. All use `allow.owner()`.
+- **Review + export** — `/feed` is the swipe feed (drafts across apps, `?app=`
+  filter). Approve = `status: APPROVED`; discard deletes the piece and its
+  assets. `PiecePreview` and the exporters both draw through
+  `drawFrame` in `src/lib/render.ts` — change that one function, never one
+  side. Export runs in the browser: Reel → silent 1080×1920 H.264 MP4
+  (WebCodecs + `mp4-muxer`), carousel/story → PNGs in a ZIP (`jszip`), image →
+  one PNG. Only approved pieces export.
 - **Hosting** — `amplify.yml` (repo root) is the **Amplify Hosting** build
   spec: `npm ci` → `npm run build`, artifacts from `dist/`, SPA rewrite of
   extensionless paths to `/index.html`, plus cache/header rules. Static SPA
   only — the Amplify backend (auth/data/storage) is untouched by hosting.
+  Web hosting on S3 + CloudFront is user-added: CDK stack in `infra/`, deploy
+  script `scripts/deploy.mjs` (`npm run deploy:web`, `deploy:web:dry`), config
+  in git-ignored `.env.deploy` (see `.env.deploy.example`, `infra/README.md`).
+  The production backend is deployed from the CLI, MyCustomer-style:
+  `npm run backend:bootstrap` then `npm run backend:deploy:prod` (writes
+  `outputs/production/amplify_outputs.json`; `deploy:web` swaps it in for the
+  build and restores the local file). Run these only when the user asks, dry
+  run first.
   Connect a branch in the Amplify console to use it; set the `VITE_*` env vars
   there (they are baked in at build). Deploys are manual (see Hard rules) —
   never run `ampx` commands or push unprompted.
-- **Overlay text styling** — each `overlayText` segment carries an optional
-  `style` object (`font`, `weight`, `size`, `tracking`, `align`, `uppercase`,
-  `italic`, `text_color`, `backdrop`, `backdrop_color`, `backdrop_opacity`).
-  Catalogs + normalization live in `src/types/content.ts`; rendering helpers
-  (font stacks, DOM preview CSS, canvas burn-in, font loading) live in
-  `src/lib/overlayText.ts`; the picker is
-  `src/components/features/OverlayStyleControls.tsx`. Old segments without a
-  `style` fall back to `DEFAULT_OVERLAY_STYLE` (the previous look). `geist` is
-  bundled; the other seven catalog fonts are injected on demand from Google
-  Fonts and awaited via `document.fonts.load()` before a render, so the export
-  never burns in a fallback face. The preview and the canvas read the same
-  style object — change both, never one.
+- **Overlay text styling** — text is drawn by `drawOverlay` in
+  `src/lib/overlayText.ts` using the style catalogs in `src/types/content.ts`
+  (`DEFAULT_OVERLAY_STYLE`). `geist` is bundled; the other catalog fonts load
+  from Google Fonts on demand and are awaited via `ensureOverlayFonts()`
+  before any render or export.
 - **PWA** — `vite-plugin-pwa` generates `sw.js` + `manifest.webmanifest` at
   build. The app registers the SW in `src/main.tsx`.
-- **Env vars** — only `VITE_*` vars reach the client. `VITE_PEXELS_API_KEY`
-  (video search, `src/services/pexels.ts`) and `VITE_JAMENDO_CLIENT_ID` (music
-  search, `src/services/music.ts`) live in `.env.local` (git-ignored) and power
-  the content render screen. They are exposed in the browser bundle; never put
-  other secrets in `VITE_*`.
+- **Env vars** — only `VITE_*` vars reach the client. The app no longer
+  reads any; `VITE_PEXELS_API_KEY` and `VITE_JAMENDO_CLIENT_ID` in
+  `.env.local` are unused and can be removed. Secrets live in SSM, read by
+  the Lambda.
 
 ## Definition of done
 

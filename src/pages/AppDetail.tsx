@@ -4,13 +4,14 @@ import { ArrowLeft } from 'lucide-react'
 import { AppConfigPanel } from '@/components/features/AppConfigPanel'
 import { AppLogo } from '@/components/features/AppLogo'
 import { ContentPanel } from '@/components/features/ContentPanel'
+import { ProfilePanel } from '@/components/features/ProfilePanel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getApp } from '@/services/apps'
 import type { AppItem } from '@/services/apps'
 
 /**
- * App detail page with vertical tabs: `content` (CRUD in a drawer) and
- * `configurations` (edit name, description, logo).
+ * App detail page with vertical tabs: `content`, `profile` (structured AI
+ * input) and `configurations` (edit name, description, logo).
  */
 export function AppDetailPage() {
   const { appId = '' } = useParams()
@@ -34,7 +35,7 @@ export function AppDetailPage() {
   }, [loadApp])
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-6 py-16">
+    <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-16">
       <Link
         to="/apps"
         className="inline-flex items-center gap-2 text-sm font-medium text-ink-soft transition-colors hover:text-ink"
@@ -54,7 +55,7 @@ export function AppDetailPage() {
         </p>
       ) : (
         <>
-          <header className="mt-8 flex items-center gap-5">
+          <header className="mt-6 flex items-center gap-4 sm:mt-8 sm:gap-5">
             <AppLogo
               value={app.logo ?? ''}
               alt={`${app.name} logo`}
@@ -74,19 +75,26 @@ export function AppDetailPage() {
           <Tabs
             defaultValue="content"
             orientation="vertical"
-            className="mt-14 items-start gap-10"
+            className="mt-8 flex-col items-stretch gap-6 sm:mt-14 lg:flex-row lg:items-start lg:gap-10"
           >
-            <TabsList variant="line" className="w-44 shrink-0 flex-col items-stretch">
-              <TabsTrigger value="content" className="justify-start">
+            <TabsList variant="line" className="w-full shrink-0 flex-row! overflow-x-auto lg:w-44 lg:flex-col!">
+              <TabsTrigger value="content" className="justify-start whitespace-nowrap">
                 Content
               </TabsTrigger>
-              <TabsTrigger value="configurations" className="justify-start">
+              <TabsTrigger value="profile" className="justify-start whitespace-nowrap">
+                Profile
+              </TabsTrigger>
+              <TabsTrigger value="configurations" className="justify-start whitespace-nowrap">
                 Configurations
               </TabsTrigger>
             </TabsList>
 
             <TabsContent value="content" className="w-full">
-              <ContentPanel appId={app.id} />
+              <ContentPanel appId={app.id} description={app.description} />
+            </TabsContent>
+
+            <TabsContent value="profile" className="w-full">
+              <ProfilePanel appId={app.id} description={app.description} />
             </TabsContent>
 
             <TabsContent value="configurations" className="w-full">

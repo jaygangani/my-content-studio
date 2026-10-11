@@ -1,0 +1,33 @@
+{
+  "env": {
+    "AWS_PROFILE": "jaygangani"
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "allow": [
+      "Bash(npm run build)",
+      "Bash(npm run dev)",
+      "Bash(npm run preview)",
+      "Bash(npx tsc -b)",
+      "Bash(npx shadcn@latest add *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)"
+    ],
+    "deny": [
+      "Bash(npx ampx *)",
+      "Bash(ampx *)",
+      "Bash(aws *)",
+      "Bash(git push*)",
+      "Read(./.env.local)",
+      "Read(./amplify_outputs.json)"
+    ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
+  }
+}

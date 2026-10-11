@@ -202,6 +202,12 @@ export interface OverlaySegment {
   end_time_sec: number
   duration_sec: number
   screen_position: string
+  /** Optional free position: box centre as a fraction of the canvas. */
+  anchor?: { x: number; y: number }
+  /** Optional wrap width as a fraction of the canvas (default 0.82). */
+  maxWidth?: number
+  /** Segments sharing a group are stacked top to bottom as one block. */
+  group?: string
   style: OverlayTextStyle
 }
 

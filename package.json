@@ -6,7 +6,17 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "infra:install": "npm install --prefix infra",
+    "infra:synth": "npm run synth --prefix infra",
+    "infra:diff": "npm run diff --prefix infra",
+    "infra:deploy": "npm run deploy --prefix infra",
+    "infra:destroy": "npm run destroy --prefix infra",
+    "deploy:web": "node scripts/deploy.mjs",
+    "deploy:web:dry": "DRY_RUN=1 node scripts/deploy.mjs",
+    "backend:bootstrap": "bash scripts/backend-bootstrap.sh",
+    "backend:deploy:prod": "bash scripts/backend-deploy.sh deploy",
+    "backend:outputs:prod": "bash scripts/backend-deploy.sh outputs"
   },
   "devDependencies": {
     "@aws-amplify/backend": "^1.25.1",
@@ -28,11 +38,15 @@
   "dependencies": {
     "@aws-amplify/ui-react": "^6.15.6",
     "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/newsreader": "^5.3.0",
     "aws-amplify": "^6.20.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cn": "^0.3.0",
+    "jszip": "^3.10.2",
     "lucide-react": "^1.47.0",
+    "mp4-muxer": "^5.2.2",
     "radix-ui": "^1.6.7",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

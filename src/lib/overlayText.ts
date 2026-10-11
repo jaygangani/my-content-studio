@@ -159,17 +159,30 @@ function wrapLines(
   return lines
 }
 
-/** Burns one styled caption frame into the 9:16 export canvas. */
-export function drawOverlay(
+interface OverlayLayout {
+  x: number
+  y: number
+  boxWidth: number
+  boxHeight: number
+  fontSize: number
+  lineHeight: number
+  padX: number
+  padY: number
+  lines: string[]
+  style: OverlayTextStyle
+}
+
+function layoutOverlay(
   ctx: CanvasRenderingContext2D,
   segment: OverlaySegment,
   width: number,
   height: number,
-) {
+  forceY?: number,
+): OverlayLayout {
   const style = segment.style ?? DEFAULT_OVERLAY_STYLE
   const fontSize = Math.round(width * overlaySizeScale(style.size))
   const lineHeight = Math.round(fontSize * 1.28)
-  const maxTextWidth = width * 0.82
+  const maxTextWidth = width * (segment.maxWidth ?? 0.82)
   const padX = Math.round(fontSize * 0.75)
   const padY = Math.round(fontSize * 0.55)
 
@@ -194,22 +207,132 @@ export function drawOverlay(
   )
   const boxHeight = lines.length * lineHeight + padY * 2 - (lineHeight - fontSize)
 
-  const { vertical, horizontal } = overlayAlignment(segment.screen_position)
-  const y =
-    vertical === 'top'
-      ? height * 0.12
-      : vertical === 'bottom'
-        ? height - boxHeight - height * 0.16
-        : (height - boxHeight) / 2
-  const x =
-    horizontal === 'left'
-      ? width * 0.06
-      : horizontal === 'right'
-        ? width - boxWidth - width * 0.06
-        : (width - boxWidth) / 2
+  let x: number
+  let y: number
+  if (segment.anchor) {
+    x = Math.min(
+      Math.max(0, segment.anchor.x * width - boxWidth / 2),
+      width - boxWidth,
+    )
+    y = Math.min(
+      Math.max(0, segment.anchor.y * height - boxHeight / 2),
+      height - boxHeight,
+    )
+  } else {
+    const { vertical, horizontal } = overlayAlignment(segment.screen_position)
+    const margins = verticalMargins(width, height)
+    y =
+      vertical === 'top'
+        ? height * margins.top
+        : vertical === 'bottom'
+          ? height - boxHeight - height * margins.bottom
+          : (height - boxHeight) / 2
+    x =
+      horizontal === 'left'
+        ? width * 0.06
+        : horizontal === 'right'
+          ? width - boxWidth - width * 0.06
+          : (width - boxWidth) / 2
+  }
 
+  if (forceY !== undefined) y = forceY
+
+  return { x, y, boxWidth, boxHeight, fontSize, lineHeight, padX, padY, lines, style }
+}
+
+const GROUP_GAP = 0.022
+
+/** Safe margins as a fraction of height: tall 9:16 leaves room for IG chrome. */
+function verticalMargins(width: number, height: number): {
+  top: number
+  bottom: number
+} {
+  return height / width > 1.5
+    ? { top: 0.14, bottom: 0.24 }
+    : { top: 0.1, bottom: 0.12 }
+}
+
+/**
+ * Vertical start for each grouped segment. Groups are placed as one block
+ * from the first member's position, then stacked with an even gap.
+ */
+export function groupOffsets(
+  ctx: CanvasRenderingContext2D,
+  segments: OverlaySegment[],
+  width: number,
+  height: number,
+): Map<OverlaySegment, number> {
+  const offsets = new Map<OverlaySegment, number>()
+  const groups = new Map<string, OverlaySegment[]>()
+  for (const item of segments) {
+    if (!item.group) continue
+    groups.set(item.group, [...(groups.get(item.group) ?? []), item])
+  }
+  for (const members of groups.values()) {
+    if (members.length < 2) continue
+    const sizes = members.map((member) => {
+      const layout = layoutOverlay(ctx, member, width, height)
+      return layout.boxHeight
+    })
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px'
+    const gap = height * GROUP_GAP
+    const total =
+      sizes.reduce((sum, value) => sum + value, 0) + gap * (members.length - 1)
+    const first = members[0]
+    const { vertical } = overlayAlignment(first.screen_position)
+    let cursor: number
+    if (first.anchor) {
+      cursor = Math.min(
+        Math.max(0, first.anchor.y * height - total / 2),
+        height - total,
+      )
+    } else if (vertical === 'top') {
+      cursor = height * verticalMargins(width, height).top
+    } else if (vertical === 'bottom') {
+      cursor = height - total - height * verticalMargins(width, height).bottom
+    } else {
+      cursor = (height - total) / 2
+    }
+    members.forEach((member, index) => {
+      offsets.set(member, cursor)
+      cursor += sizes[index] + gap
+    })
+  }
+  return offsets
+}
+
+/** Bounding box of an overlay on the canvas, for hit-testing and selection. */
+export function overlayBox(
+  ctx: CanvasRenderingContext2D,
+  segment: OverlaySegment,
+  width: number,
+  height: number,
+  forceY?: number,
+): { x: number; y: number; width: number; height: number } {
+  const layout = layoutOverlay(ctx, segment, width, height, forceY)
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px'
+  return {
+    x: layout.x,
+    y: layout.y,
+    width: layout.boxWidth,
+    height: layout.boxHeight,
+  }
+}
+
+/** Burns one styled caption frame into the 9:16 export canvas. */
+export function drawOverlay(
+  ctx: CanvasRenderingContext2D,
+  segment: OverlaySegment,
+  width: number,
+  height: number,
+  forceY?: number,
+) {
+  const { x, y, boxWidth, boxHeight, fontSize, lineHeight, padX, padY, lines, style } =
+    layoutOverlay(ctx, segment, width, height, forceY)
+
+  const baseAlpha = ctx.globalAlpha
   if (style.backdrop !== 'none') {
-    ctx.globalAlpha = style.backdrop_opacity
+    ctx.globalAlpha = baseAlpha * style.backdrop_opacity
     ctx.fillStyle = overlayBackdropColorHex(style)
     ctx.beginPath()
     ctx.roundRect(
@@ -222,10 +345,16 @@ export function drawOverlay(
         : Math.round(width * 0.02),
     )
     ctx.fill()
-    ctx.globalAlpha = 1
+    ctx.globalAlpha = baseAlpha
   }
 
   ctx.fillStyle = overlayTextColorHex(style)
+  const shadowed = style.backdrop === 'none'
+  if (shadowed) {
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.55)'
+    ctx.shadowBlur = Math.round(fontSize * 0.3)
+    ctx.shadowOffsetY = Math.round(fontSize * 0.05)
+  }
   const textX =
     style.align === 'left'
       ? x + padX
@@ -235,6 +364,11 @@ export function drawOverlay(
   lines.forEach((line, index) => {
     ctx.fillText(line, textX, y + padY + index * lineHeight)
   })
+  if (shadowed) {
+    ctx.shadowColor = 'transparent'
+    ctx.shadowBlur = 0
+    ctx.shadowOffsetY = 0
+  }
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0px'
 }
 
