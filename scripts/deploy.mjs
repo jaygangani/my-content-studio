@@ -15,7 +15,7 @@ if (process.argv.includes('--help')) {
 Env (or .env.deploy, written by npm run infra:deploy):
   S3_BUCKET, CLOUDFRONT_DISTRIBUTION_ID   required
   AWS_REGION (default ap-south-1), S3_PREFIX, APP_URL
-  AMPLIFY_OUTPUTS                         production outputs file (default outputs/production/amplify_outputs.json)
+  AMPLIFY_OUTPUTS                         production outputs file (default outputs/main/amplify_outputs.json)
   SKIP_BUILD=1, DRY_RUN=1, YES=1 (skip the prompt)
 
 Usage:
@@ -36,7 +36,7 @@ const skipBuild = truthy(process.env.SKIP_BUILD)
 const assumeYes = truthy(process.env.YES)
 const prodOutputs = process.env.AMPLIFY_OUTPUTS
   ? join(root, process.env.AMPLIFY_OUTPUTS)
-  : join(root, 'outputs', 'production', 'amplify_outputs.json')
+  : join(root, 'outputs', 'main', 'amplify_outputs.json')
 const rootOutputs = join(root, 'amplify_outputs.json')
 const backupOutputs = join(root, '.amplify_outputs.local.bak')
 

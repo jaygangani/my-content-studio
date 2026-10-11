@@ -34,9 +34,9 @@ the printed CloudFront domain.
 
 ## Deploy the backend (CLI only, no console or CI)
 
-Same flow as MyCustomer `v2/backend`: an Amplify app and a `production` branch
+Same flow as MyCustomer `v2/backend`: an Amplify app and a `main` branch
 are created with the AWS CLI, then `ampx pipeline-deploy` runs from your
-terminal. The sandbox is untouched.
+terminal. `main` is the production branch. No pipeline or Git connection is set up. The sandbox is untouched.
 
 ```bash
 export AWS_PROFILE=jaygangani
@@ -45,9 +45,10 @@ npm run backend:deploy:prod
 ```
 
 - `backend:bootstrap` creates the app and branch once and saves the id to
-  `.amplify-app-id` (git-ignored).
+  `.amplify-app-id` (git-ignored). Override the branch name with
+  `AMPLIFY_BRANCH` if you ever need a different one.
 - `backend:deploy:prod` asks for confirmation, deploys, and writes
-  `outputs/production/amplify_outputs.json`.
+  `outputs/main/amplify_outputs.json`.
 - `backend:outputs:prod` regenerates that file without redeploying.
 
 The production backend has its own Cognito pool, tables, bucket, Lambda and API.

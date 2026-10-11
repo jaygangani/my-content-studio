@@ -64,7 +64,8 @@ storage), and a **PWA** service worker. The visual language follows
 
 - `CLAUDE.md` imports this file; keep rules here, not there.
 - `.claude/settings.json` (shared) allows build/dev commands and denies
-  `ampx`, `aws`, `git push`, and reads of secret files. Personal overrides go
+  `ampx`, `aws`, and reads of secret files; `git push` is not auto-allowed
+  except `origin main` when the user asks. Personal overrides go
   in `.claude/settings.local.json` (git-ignored).
 - Project skills live in `.opencode/skills/` (`add-page`, `amplify-data`,
   `design-system`, `shadcn-ui`); `.claude/skills` symlinks to it. Use them
@@ -180,7 +181,7 @@ infra/           CDK stack for web hosting (own package.json)
   in git-ignored `.env.deploy` (see `.env.deploy.example`, `infra/README.md`).
   The production backend is deployed from the CLI, MyCustomer-style:
   `npm run backend:bootstrap` then `npm run backend:deploy:prod` (writes
-  `outputs/production/amplify_outputs.json`; `deploy:web` swaps it in for the
+  `outputs/main/amplify_outputs.json`; `deploy:web` swaps it in for the
   build and restores the local file). Run these only when the user asks, dry
   run first.
   Connect a branch in the Amplify console to use it; set the `VITE_*` env vars

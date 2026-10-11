@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_ID_FILE="$ROOT/.amplify-app-id"
 REGION="${AWS_REGION:-ap-south-1}"
 APP_NAME="${AMPLIFY_APP_NAME:-mycontentstudio-backend}"
-BRANCH="production"
+BRANCH="${AMPLIFY_BRANCH:-main}"
 
 echo "Region:  $REGION"
 echo "AWS:     ${AWS_PROFILE:-default credentials}"

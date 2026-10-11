@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_ID_FILE="$ROOT/.amplify-app-id"
 REGION="${AWS_REGION:-ap-south-1}"
-BRANCH="production"
-OUT_DIR="$ROOT/outputs/production"
+BRANCH="${AMPLIFY_BRANCH:-main}"
+OUT_DIR="$ROOT/outputs/$BRANCH"
 MODE="${1:-deploy}"
 
 if [[ ! -f "$APP_ID_FILE" ]]; then
@@ -20,7 +20,7 @@ cd "$ROOT"
 if [[ "$MODE" == "outputs" ]]; then
   mkdir -p "$OUT_DIR"
   npx ampx generate outputs --branch "$BRANCH" --app-id "$APP_ID" --out-dir "$OUT_DIR"
-  echo "Outputs: outputs/production/amplify_outputs.json"
+  echo "Outputs: outputs/$BRANCH/amplify_outputs.json"
   exit 0
 fi
 
@@ -44,5 +44,5 @@ mkdir -p "$OUT_DIR"
 npx ampx generate outputs --branch "$BRANCH" --app-id "$APP_ID" --out-dir "$OUT_DIR"
 
 echo ""
-echo "Backend deployed. Outputs: outputs/production/amplify_outputs.json"
+echo "Backend deployed. Outputs: outputs/$BRANCH/amplify_outputs.json"
 echo "Next: npm run deploy:web"

@@ -16,13 +16,13 @@
       "Bash(npx shadcn@latest add *)",
       "Bash(git status*)",
       "Bash(git diff*)",
-      "Bash(git log*)"
+      "Bash(git log*)",
+      "Bash(git push origin main)"
     ],
     "deny": [
       "Bash(npx ampx *)",
       "Bash(ampx *)",
       "Bash(aws *)",
-      "Bash(git push*)",
       "Read(./.env.local)",
       "Read(./amplify_outputs.json)"
     ]
