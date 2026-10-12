@@ -25,6 +25,7 @@ import {
   formatEnum,
   generateContentDraft,
   getUsageToday,
+  isAdminUser,
   listContentByApp,
 } from '@/services/content'
 import type { ContentItem } from '@/services/content'
@@ -146,16 +147,19 @@ export function ContentPanel({ appId, description }: ContentPanelProps) {
   const [error, setError] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [used, setUsed] = useState(0)
+  const [admin, setAdmin] = useState(false)
   const [missing, setMissing] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setError(null)
     try {
-      const [list, usage, profile] = await Promise.all([
+      const [list, usage, profile, isAdmin] = await Promise.all([
         listContentByApp(appId),
         getUsageToday(appId),
         getProfile(appId),
+        isAdminUser().catch(() => false),
       ])
+      setAdmin(isAdmin)
       setItems(
         [...list].sort((a, b) =>
           (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
@@ -204,7 +208,7 @@ export function ContentPanel({ appId, description }: ContentPanelProps) {
     }
   }
 
-  const limitReached = used >= DAILY_GENERATION_LIMIT
+  const limitReached = !admin && used >= DAILY_GENERATION_LIMIT
   const blocked = generating || limitReached || missing.length > 0
 
   return (
@@ -234,7 +238,9 @@ export function ContentPanel({ appId, description }: ContentPanelProps) {
               ? 'Generating…'
               : limitReached
                 ? 'Limit reached — resets at midnight'
-                : `Generate (${DAILY_GENERATION_LIMIT - used} left today)`}
+                : admin
+                  ? 'Generate (no daily limit)'
+                  : `Generate (${DAILY_GENERATION_LIMIT - used} left today)`}
           </Button>
         </div>
       </div>

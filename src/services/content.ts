@@ -120,7 +120,7 @@ export function localDateString(date: Date = new Date()): string {
 export interface GenerationResult {
   piece: ContentItem
   used: number
-  limit: number
+  limit: number | null
 }
 
 /** One stock media result returned by the stock-search endpoint. */
@@ -248,4 +248,11 @@ export async function listDrafts(): Promise<ContentItem[]> {
   return [...data].sort((a, b) =>
     (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
   )
+}
+
+/** True when the signed-in user belongs to the Cognito `admin` group. */
+export async function isAdminUser(): Promise<boolean> {
+  const session = await fetchAuthSession()
+  const groups = session.tokens?.accessToken?.payload['cognito:groups']
+  return Array.isArray(groups) && groups.includes('admin')
 }

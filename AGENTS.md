@@ -154,7 +154,9 @@ infra/           CDK stack for web hosting (own package.json)
   `docs/72-short-form-content-formats (2).md`. The Lambda sets `owner`
   (`sub::username` from the JWT) on every row it writes, otherwise
   `allow.owner()` hides it from the user. Limit is 5 per app per
-  user-local day (`DailyUsage`, id `appId#YYYY-MM-DD`). **SSM params:**
+  user-local day (`DailyUsage`, id `appId#YYYY-MM-DD`); members of the Cognito
+  `admin` group (`defineAuth` `groups`) have no limit — the Lambda reads
+  `cognito:groups` from the JWT. **SSM params:**
   `OPENAI_API_KEY_PARAM` (`/mycontentstudio/openai/api-key`) and
   `PEXELS_API_KEY_PARAM` (`/mycontentstudio/pexels/api-key`); model is env
   `OPENAI_MODEL` (default `gpt-4o-mini`). Create both parameters before

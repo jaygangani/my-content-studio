@@ -207,6 +207,26 @@ function callerOwner(event: ApiEvent): string {
   return username;
 }
 
+const ADMIN_GROUP = 'admin';
+
+function callerGroups(event: ApiEvent): string[] {
+  const claims = event.requestContext?.authorizer?.jwt?.claims ?? {};
+  const raw = claims['cognito:groups'];
+  if (Array.isArray(raw)) {
+    return raw.filter((item): item is string => typeof item === 'string');
+  }
+  if (typeof raw !== 'string') return [];
+  return raw
+    .replace(/^\[|\]$/g, '')
+    .split(/[\s,]+/)
+    .map((item) => item.replace(/^"|"$/g, '').trim())
+    .filter(Boolean);
+}
+
+function isAdmin(event: ApiEvent): boolean {
+  return callerGroups(event).includes(ADMIN_GROUP);
+}
+
 function ownerMatches(stored: string, username: string): boolean {
   return stored === username || stored.split('::')[1] === username;
 }
@@ -591,6 +611,7 @@ interface RunInput {
   localDate: string;
   forced?: Selection;
   replacePieceId?: string;
+  unlimited: boolean;
 }
 
 async function runGeneration(input: RunInput) {
@@ -656,8 +677,11 @@ async function runGeneration(input: RunInput) {
   }
 
   const used = await readUsage(client, appId, localDate);
-  log('usage', { used, limit: DAILY_LIMIT });
-  if (used >= DAILY_LIMIT) {
+  log('usage', {
+    used,
+    limit: input.unlimited ? 'unlimited' : DAILY_LIMIT,
+  });
+  if (!input.unlimited && used >= DAILY_LIMIT) {
     throw new HttpError(
       429,
       `Daily limit of ${DAILY_LIMIT} generations reached. It resets at midnight.`,
@@ -866,7 +890,11 @@ async function runGeneration(input: RunInput) {
 
   const nextUsed = await bumpUsage(client, appId, localDate, owner, used);
   log('run.done', { pieceId: piece.id, used: nextUsed });
-  return { piece, used: nextUsed, limit: DAILY_LIMIT };
+  return {
+    piece,
+    used: nextUsed,
+    limit: input.unlimited ? null : DAILY_LIMIT,
+  };
 }
 
 async function createClient(): Promise<DataClient> {
@@ -887,6 +915,7 @@ async function handleGenerate(event: ApiEvent): Promise<ApiResult> {
     owner,
     appId: requireString(body, 'appId'),
     localDate: requireLocalDate(body),
+    unlimited: isAdmin(event),
   });
   return jsonResponse(200, result);
 }
@@ -917,6 +946,7 @@ async function handleRegenerate(event: ApiEvent): Promise<ApiResult> {
     appId: piece.appId,
     localDate: requireLocalDate(body),
     replacePieceId: piece.id,
+    unlimited: isAdmin(event),
     forced: {
       format,
       personaId: piece.personaId,
@@ -957,6 +987,7 @@ export const handler = async (event: ApiEvent): Promise<ApiResult> => {
     const claims = event.requestContext?.authorizer?.jwt?.claims ?? {};
     log('request', {
       path,
+      groups: callerGroups(event),
       hasBody: Boolean(event.body),
       claimKeys: Object.keys(claims),
       hasSub: typeof claims.sub === 'string',
