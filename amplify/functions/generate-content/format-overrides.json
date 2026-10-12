@@ -23,13 +23,22 @@
     "sharpen": "Format: 'Tell me you [identity] without telling me you [identity].' then a second line with the tell. The tell must be a small physical or digital habit (what is on their screen, what is in their bag, what they search at 1am), never a trait or feeling."
   },
   "61": {
-    "sharpen": "Each slide is one different meme with a different tension. No two slides may share the same joke mechanic. Every slide names a concrete moment, object or search term the persona recognises. Slide 1 is the strongest. Last slide ties back to the app naturally, without selling."
+    "sharpen": "Each slide is one different meme with a different tension. No two slides may share the same joke mechanic. Every slide names a concrete moment, object or search term the persona recognises. Slide 1 is the strongest. Last slide ties back to the app naturally, without selling.",
+    "stockPolicy": "preferred",
+    "variant": "poster"
   },
   "62": {
-    "sharpen": "Slide 1 sets up a specific situation ending mid-thought with an ellipsis or a loaded 'so'. Slide 2 delivers a punchline that reverses the expectation with a concrete detail. The setup must be a real moment, not a general statement."
+    "sharpen": "Slide 1 sets up a specific situation ending mid-thought with an ellipsis or a loaded 'so'. Slide 2 delivers a punchline that reverses the expectation with a concrete detail. The setup must be a real moment, not a general statement.",
+    "slideRange": [
+      2,
+      3
+    ],
+    "variant": "poster",
+    "stockPolicy": "allowed"
   },
   "63": {
-    "sharpen": "3-4 panels, each with one speaker line of max 8 words. Panel 1: a specific situation. Panel 2: the persona's wrong move. Panel 3: the consequence in a concrete detail. Panel 4 (optional): the turn that shows the app. Use two named characters, e.g. 'Me' and one invented friend name."
+    "sharpen": "3-4 panels, each with one speaker line of max 8 words. Panel 1: a specific situation. Panel 2: the persona's wrong move. Panel 3: the consequence in a concrete detail. Panel 4 (optional): the turn that shows the app. Use two named characters, e.g. 'Me' and one invented friend name.",
+    "variant": "chat"
   },
   "64": {
     "layout": "stack",
@@ -79,37 +88,50 @@
     "sharpen": "Each item must be a fact a beginner genuinely would not know, stated as a specific claim with a reason, not an opinion. No 'it takes time' or 'be patient'. Order from surprising to most useful."
   },
   "11": {
-    "sharpen": "Each mistake names the exact action the persona does (what they click, say, skip) and the exact price they pay (time lost, number, outcome). End each with the fix in 4 words."
+    "sharpen": "Each mistake names the exact action the persona does (what they click, say, skip) and the exact price they pay (time lost, number, outcome). End each with the fix in 4 words.",
+    "variant": "flags",
+    "stockPolicy": "allowed"
   },
   "13": {
-    "sharpen": "Give the framework a 2-3 word memorable name made of concrete words, then 3-4 steps that each start with a verb and include an example from the persona's day. No acronyms of abstract words."
+    "sharpen": "Give the framework a 2-3 word memorable name made of concrete words, then 3-4 steps that each start with a verb and include an example from the persona's day. No acronyms of abstract words.",
+    "variant": "cards"
   },
   "31": {
-    "sharpen": "Tiers must be 5-7 specific, nameable things from this niche (tools, habits, methods), not categories. S-tier and F-tier each get a one-line reason with a concrete detail. Take a stance that will start an argument."
+    "sharpen": "Tiers must be 5-7 specific, nameable things from this niche (tools, habits, methods), not categories. S-tier and F-tier each get a one-line reason with a concrete detail. Take a stance that will start an argument.",
+    "variant": "tier"
   },
   "33": {
-    "sharpen": "Flags are observable behaviours with a specific moment (what someone says, what is on their screen, what they do at 11pm). Red flags must be uncomfortably true; green flags must be surprising, not praise. No generic traits like 'is disciplined'."
+    "sharpen": "Flags are observable behaviours with a specific moment (what someone says, what is on their screen, what they do at 11pm). Red flags must be uncomfortably true; green flags must be surprising, not praise. No generic traits like 'is disciplined'.",
+    "variant": "flags"
   },
   "34": {
-    "sharpen": "3-5 types, each with an invented but vivid name (2-3 words) and one signature behaviour with a specific object or time. Each type must be a person the persona has met or been. Include the type that makes the persona laugh at themselves."
+    "sharpen": "3-5 types, each with an invented but vivid name (2-3 words) and one signature behaviour with a specific object or time. Each type must be a person the persona has met or been. Include the type that makes the persona laugh at themselves.",
+    "stockPolicy": "preferred",
+    "variant": "cards"
   },
   "35": {
     "sharpen": "Ten rungs 1-10 are too many; use 3 labelled anchor points (1, 5, 10) each a specific behaviour with a number or object. The question must be a habit, not a feeling."
   },
   "36": {
-    "sharpen": "Signs are small, specific, observable details (a browser tab, a saved folder, a phrase typed into search). Each sign max 9 words. Order so the last sign is the one that makes them say 'that is literally me'."
+    "sharpen": "Signs are small, specific, observable details (a browser tab, a saved folder, a phrase typed into search). Each sign max 9 words. Order so the last sign is the one that makes them say 'that is literally me'.",
+    "variant": "checklist",
+    "stockPolicy": "preferred"
   },
   "40": {
     "sharpen": "Two speakers, 6-8 messages, each max 10 words and written as real texts (lowercase, fragments, one typo or emoji allowed). The conflict is one specific misunderstanding that the app resolves. Avoid greetings."
   },
   "46": {
-    "sharpen": "Five levels, each named with a concrete behaviour not an adjective (not 'Beginner'; use what they actually do). Level 1 must be funny and specific, level 5 must be aspirational but realistic."
+    "sharpen": "Five levels, each named with a concrete behaviour not an adjective (not 'Beginner'; use what they actually do). Level 1 must be funny and specific, level 5 must be aspirational but realistic.",
+    "variant": "level"
   },
   "47": {
-    "sharpen": "Quiz result types are 3-4 vivid named personas with one defining habit each. Question is one specific scenario with 3-4 answer options that sound like real actions. No 'it depends' options."
+    "sharpen": "Quiz result types are 3-4 vivid named personas with one defining habit each. Question is one specific scenario with 3-4 answer options that sound like real actions. No 'it depends' options.",
+    "variant": "cards",
+    "stockPolicy": "preferred"
   },
   "48": {
-    "sharpen": "Do the arithmetic with numbers from the profile or show the calculation plainly. State the shocking number first, then the line that makes it personal ('That is X hours of your Tuesday')."
+    "sharpen": "Do the arithmetic with numbers from the profile or show the calculation plainly. State the shocking number first, then the line that makes it personal ('That is X hours of your Tuesday').",
+    "variant": "stat"
   },
   "57": {
     "sharpen": "Tie to one real season or date moment that changes this persona's actual routine, with a specific behaviour that changes. Do not say 'new year, new you' or similar."
@@ -127,10 +149,12 @@
     "sharpen": "Celebrate a tiny, specific win with the exact number or object ('opened the app 3 days in a row', 'finally understood what a margin is'). The tinier and more specific the better."
   },
   "43": {
-    "sharpen": "Pick 3-5 real terms a beginner in this niche has seen and not understood. Each: the term, then 'means:' plus a plain-language definition using an everyday object, max 10 words."
+    "sharpen": "Pick 3-5 real terms a beginner in this niche has seen and not understood. Each: the term, then 'means:' plus a plain-language definition using an everyday object, max 10 words.",
+    "variant": "template"
   },
   "44": {
-    "sharpen": "Cheat sheet entries are shortcuts the persona would screenshot: a command, a number, a rule of thumb. Each entry max 8 words and must contain something checkable (a number, a name, a step). No advice-only lines."
+    "sharpen": "Cheat sheet entries are shortcuts the persona would screenshot: a command, a number, a rule of thumb. Each entry max 8 words and must contain something checkable (a number, a name, a step). No advice-only lines.",
+    "variant": "grid"
   },
   "5": {
     "sharpen": "POV line puts the viewer in one exact moment (time, place, device, what is on screen). It must already contain the problem. Do not explain; let the scene carry it."
@@ -143,5 +167,47 @@
   },
   "2": {
     "sharpen": "The teaser promises something specific enough to be wrong. Each line adds one concrete detail (a number, a name, a time). The reveal must be a surprising fact or reframing, not a restatement."
+  },
+  "9": {
+    "variant": "steps",
+    "stockPolicy": "allowed"
+  },
+  "60": {
+    "variant": "timeline",
+    "stockPolicy": "allowed"
+  },
+  "12": {
+    "variant": "checklist",
+    "stockPolicy": "allowed"
+  },
+  "15": {
+    "stockPolicy": "preferred",
+    "variant": "editorial"
+  },
+  "10": {
+    "variant": "split"
+  },
+  "14": {
+    "variant": "split"
+  },
+  "16": {
+    "variant": "cards"
+  },
+  "30": {
+    "variant": "stat"
+  },
+  "41": {
+    "variant": "quote",
+    "stockPolicy": "preferred"
+  },
+  "45": {
+    "variant": "template"
+  },
+  "49": {
+    "variant": "chat",
+    "stockPolicy": "allowed"
+  },
+  "54": {
+    "variant": "timeline"
   }
 }

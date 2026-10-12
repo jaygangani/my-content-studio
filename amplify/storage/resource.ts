@@ -8,6 +8,9 @@ import { defineStorage } from '@aws-amplify/backend';
 export const storage = defineStorage({
   name: 'mycontentstudioStorage',
   access: (allow) => ({
-    'media/*': [allow.authenticated.to(['read', 'write', 'delete'])],
+    'media/*': [
+      allow.authenticated.to(['read', 'write', 'delete']),
+      allow.groups(['admin']).to(['read', 'write', 'delete']),
+    ],
   }),
 });

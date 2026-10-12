@@ -90,11 +90,19 @@ export function AppDetailPage() {
             </TabsList>
 
             <TabsContent value="content" className="w-full">
-              <ContentPanel appId={app.id} description={app.description} />
+              <ContentPanel
+                appId={app.id}
+                description={app.description}
+                appLogo={app.logo}
+              />
             </TabsContent>
 
             <TabsContent value="profile" className="w-full">
-              <ProfilePanel appId={app.id} description={app.description} />
+              <ProfilePanel
+                appId={app.id}
+                description={app.description}
+                appLogo={app.logo}
+              />
             </TabsContent>
 
             <TabsContent value="configurations" className="w-full">

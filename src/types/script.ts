@@ -17,11 +17,22 @@ export interface ReelPayload {
   unified?: boolean
 }
 
+export type CarouselVisualType =
+  | 'typography'
+  | 'icon'
+  | 'data'
+  | 'screenshot'
+  | 'stock'
+
 export interface CarouselSlide {
   role: string
   headline: string
   body: string
   visual: string
+  visual_type?: CarouselVisualType
+  icon?: string
+  stat_value?: string
+  stat_label?: string
 }
 
 export interface CarouselPayload {
@@ -73,6 +84,32 @@ interface ScriptBase {
   formatName: string
   textStyle?: string
   layout?: 'card' | 'grid' | 'columns' | 'stack'
+  variant?:
+    | 'steps'
+    | 'checklist'
+    | 'split'
+    | 'stat'
+    | 'quote'
+    | 'tier'
+    | 'cards'
+    | 'chat'
+    | 'level'
+    | 'timeline'
+    | 'grid'
+    | 'flags'
+    | 'editorial'
+    | 'template'
+    | 'poster'
+  stockPolicy?: 'never' | 'allowed' | 'preferred'
+  bgScheme?: 'dark' | 'light' | 'tinted' | 'bold'
+  hookCover?:
+    | 'classic'
+    | 'centered'
+    | 'bigtype'
+    | 'framed'
+    | 'split'
+    | 'badge'
+    | 'stripe'
   textOverrides?: Partial<Record<TextRole, TextOverride>>
   /** Per-frame (beat, slide, frame) tweaks keyed by frame index. */
   frameOverrides?: Record<string, Partial<Record<TextRole, TextOverride>>>

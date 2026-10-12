@@ -1,3 +1,4 @@
+import type { BrandAssets } from '@/lib/carousel'
 import { exportReel } from '@/lib/export/reel'
 import { renderPngs, zipFiles } from '@/lib/export/images'
 import type { AssetItem } from '@/services/assets'
@@ -54,6 +55,7 @@ export async function exportPiece(
   script: PieceScript,
   assets: AssetItem[],
   onProgress: (fraction: number) => void,
+  brandAssets?: BrandAssets | null,
 ): Promise<ExportResult> {
   const base = exportBaseName(appName, script)
 
@@ -64,7 +66,7 @@ export async function exportPiece(
     }
   }
 
-  const pngs = await renderPngs(script, assets, onProgress)
+  const pngs = await renderPngs(script, assets, onProgress, brandAssets)
   if (script.schema === 'IMAGE') {
     return { blob: pngs[0], filename: `${base}.png` }
   }

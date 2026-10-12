@@ -59,10 +59,31 @@ function escapeRegExp(value: string): string {
 }
 
 /** Structural checks from FR-3.4. Returns human-readable problems. */
+export interface CarouselContext {
+  screenshotIds: string[];
+}
+
+const CAROUSEL_VISUALS = ['typography', 'icon', 'data', 'screenshot', 'stock'];
+const CAROUSEL_ICONS = [
+  'check',
+  'x',
+  'arrow',
+  'bolt',
+  'star',
+  'clock',
+  'heart',
+  'target',
+  'bulb',
+  'chat',
+];
+const CTA_PHRASES =
+  /\b(save this|save for later|follow (us|me|for)|comment [A-Z]{3,}|link in bio|dm me|share this)\b/i;
+
 export function validatePayload(
   format: FormatEntry,
   payload: GeneratedPayload,
   bannedWords: string[],
+  carouselContext?: CarouselContext,
 ): string[] {
   const problems: string[] = [];
 
@@ -94,18 +115,73 @@ export function validatePayload(
     if (!p.hashtags?.length) problems.push('hashtags are empty');
   } else if (format.igFormat === 'CAROUSEL') {
     const p = payload as CarouselPayload;
-    if (!Array.isArray(p.slides) || p.slides.length < 2) {
-      problems.push('carousel needs at least 2 slides');
+    const [minSlides, maxSlides] = format.slideRange ?? [5, 8];
+    if (!Array.isArray(p.slides)) {
+      problems.push('carousel has no slides');
+    } else if (p.slides.length < minSlides || p.slides.length > maxSlides) {
+      problems.push(
+        `carousel needs ${minSlides}-${maxSlides} slides, got ${p.slides.length}`,
+      );
     } else {
+      const last = p.slides.length - 1;
+      let stockCount = 0;
       p.slides.forEach((slide, i) => {
-        if (!slide.headline?.trim()) problems.push(`slide ${i + 1} has no headline`);
-        else if (words(slide.headline) > 8) {
-          problems.push(`slide ${i + 1} headline is longer than 8 words`);
+        const expected = i === 0 ? 'hook' : i === last ? 'cta' : 'value';
+        if (slide.role !== expected) {
+          problems.push(`slide ${i + 1} role must be "${expected}"`);
         }
-        if (words(slide.body ?? '') > 25) {
-          problems.push(`slide ${i + 1} body is longer than 25 words`);
+        if (!slide.headline?.trim()) problems.push(`slide ${i + 1} has no headline`);
+        else if (words(slide.headline) > 7) {
+          problems.push(`slide ${i + 1} headline is longer than 7 words`);
+        }
+        if (words(slide.body ?? '') > 22) {
+          problems.push(`slide ${i + 1} body is longer than 22 words`);
+        }
+        const middle = i !== 0 && i !== last;
+        if (middle && format.variant === 'split' && !slide.body.includes('||')) {
+          problems.push(`slide ${i + 1} body must use "left || right"`);
+        }
+        if (middle && format.variant === 'grid' && slide.body.split('||').length < 3) {
+          problems.push(`slide ${i + 1} body needs 3-4 items separated by ||`);
+        }
+        if (middle && format.variant === 'tier' && !/[,|]/.test(slide.body)) {
+          problems.push(`slide ${i + 1} body needs 2-4 items separated by ||`);
+        }
+        if (middle && format.variant === 'flags' && !['check', 'x'].includes(slide.icon)) {
+          problems.push(`slide ${i + 1} icon must be "check" or "x"`);
+        }
+        if (middle && format.variant === 'timeline' && !slide.stat_label?.trim()) {
+          problems.push(`slide ${i + 1} needs a time label in stat_label`);
+        }
+        if (!CAROUSEL_VISUALS.includes(slide.visual_type)) {
+          problems.push(`slide ${i + 1} has an invalid visual_type`);
+        }
+        if (slide.visual_type === 'icon' && !CAROUSEL_ICONS.includes(slide.icon)) {
+          problems.push(`slide ${i + 1} icon must be one of ${CAROUSEL_ICONS.join(', ')}`);
+        }
+        if (slide.visual_type === 'data' && !slide.stat_value?.trim()) {
+          problems.push(`slide ${i + 1} data slide needs stat_value`);
+        }
+        if (slide.visual_type === 'screenshot') {
+          const ids = carouselContext?.screenshotIds ?? [];
+          if (!ids.includes(slide.visual)) {
+            problems.push(`slide ${i + 1} screenshot must use a listed feature id`);
+          }
+        }
+        if (slide.visual_type === 'stock') {
+          stockCount += 1;
+          if ((format.stockPolicy ?? 'never') === 'never') {
+            problems.push(`slide ${i + 1} stock photos are not allowed for this format`);
+          } else if (i !== 0) {
+            problems.push('a stock photo may only be used on slide 1');
+          }
+          if (!slide.visual?.trim()) problems.push(`slide ${i + 1} stock needs a photo query`);
+        }
+        if (i !== last && CTA_PHRASES.test(`${slide.headline} ${slide.body}`)) {
+          problems.push(`slide ${i + 1} contains a call to action, only the last slide may`);
         }
       });
+      if (stockCount > 1) problems.push('use at most one stock photo slide');
     }
     if (!p.caption?.trim()) problems.push('caption is empty');
     if (!p.hashtags?.length) problems.push('hashtags are empty');

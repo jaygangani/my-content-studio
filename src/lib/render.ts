@@ -9,6 +9,8 @@ import {
 } from '@/lib/textStyles'
 import type { AssetItem } from '@/services/assets'
 import type { PieceScript, PieceSchema } from '@/types/script'
+import { paintCarouselSlide } from '@/lib/carousel'
+import type { BrandAssets } from '@/lib/carousel'
 import { drawOverlay, groupOffsets } from '@/lib/overlayText'
 
 export interface FrameMedia {
@@ -23,6 +25,12 @@ export interface Frame {
   media: FrameMedia | null
   segments: OverlaySegment[]
   scrim: number
+  paint?: (
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    source: CanvasImageSource | null,
+  ) => void
 }
 
 export interface Surface {
@@ -73,7 +81,11 @@ function compact(segments: OverlaySegment[]): OverlaySegment[] {
   return segments.filter((s) => s.text.trim())
 }
 
-export function buildFrames(script: PieceScript, assets: AssetItem[]): Frame[] {
+export function buildFrames(
+  script: PieceScript,
+  assets: AssetItem[],
+  brandAssets?: BrandAssets | null,
+): Frame[] {
   const preset = getTextStylePreset(script.textStyle)
   const forFrame = (index: number) => {
     const overrides = mergeOverrides(
@@ -122,7 +134,35 @@ export function buildFrames(script: PieceScript, assets: AssetItem[]): Frame[] {
         }
       })
     }
-    case 'CAROUSEL':
+    case 'CAROUSEL': {
+      const branded =
+        brandAssets && script.payload.slides.some((slide) => slide.visual_type)
+      if (branded && brandAssets) {
+        const slides = script.payload.slides
+        return slides.map((slide, index) => ({
+          id: `slide-${index}`,
+          seconds: STILL_SECONDS,
+          media:
+            slide.visual_type === 'stock' ? mediaFor(assets, index) : null,
+          segments: [],
+          scrim: 0,
+          paint: (ctx, width, height, source) => {
+            paintCarouselSlide(
+              ctx,
+              width,
+              height,
+              slide,
+              index,
+              slides.length,
+              brandAssets,
+              source,
+              script.variant,
+              script.bgScheme,
+              script.hookCover,
+            )
+          },
+        }))
+      }
       return script.payload.slides.map((slide, index) => {
         const f = forFrame(index)
         return {
@@ -140,6 +180,7 @@ export function buildFrames(script: PieceScript, assets: AssetItem[]): Frame[] {
           scrim,
         }
       })
+    }
     case 'IMAGE': {
       const lines = script.payload.text_lines.filter((line) => line.trim())
       const cell = (size: OverlayTextStyle['size']): OverlayTextStyle => ({
@@ -245,6 +286,21 @@ function drawCover(
   const dw = sw * scale
   const dh = sh * scale
   ctx.drawImage(source, (width - dw) / 2, (height - dh) / 2, dw, dh)
+}
+
+/** Paints a frame with its own painter when it has one, else the default. */
+export function paintFrame(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  source: CanvasImageSource | null,
+  frame: Frame,
+) {
+  if (frame.paint) {
+    frame.paint(ctx, width, height, source)
+    return
+  }
+  drawFrame(ctx, width, height, source, frame.segments, frame.scrim)
 }
 
 /** Paints one frame. Shared by the live preview and the exporters. */

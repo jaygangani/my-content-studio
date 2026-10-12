@@ -1,4 +1,5 @@
 import { dataClient } from '@/lib/amplify'
+import { normalizeBrand } from '@/lib/brand'
 import { emptyProfile } from '@/types/profile'
 import type { AppProfileData } from '@/types/profile'
 
@@ -20,6 +21,15 @@ function parseJson<T extends object>(value: unknown, fallback: T): T {
     return fallback
   }
   return fallback
+}
+
+function parseRaw(value: unknown): unknown {
+  if (typeof value !== 'string') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
 }
 
 function parseList<T>(value: unknown): T[] {
@@ -51,7 +61,7 @@ export async function getProfile(appId: string): Promise<LoadedProfile> {
       voice: parseJson(row.voice, base.voice),
       proof: parseJson(row.proof, base.proof),
       competitors: parseList(row.competitors),
-      brand: parseJson(row.brand, base.brand),
+      brand: normalizeBrand(parseRaw(row.brand)),
       storeUrl: row.storeUrl ?? '',
       ctaText: row.ctaText ?? '',
     },

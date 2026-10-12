@@ -4,6 +4,13 @@ import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -17,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { getMissingBrandFields } from '@/lib/brand'
 import { getMissingProfileFields } from '@/lib/profile'
 import { getProfile } from '@/services/profile'
 import {
@@ -28,12 +36,25 @@ import {
   isAdminUser,
   listContentByApp,
 } from '@/services/content'
-import type { ContentItem } from '@/services/content'
+import type { ContentItem, IgFormat } from '@/services/content'
 import { parseScript } from '@/types/script'
+
+const CONTENT_TYPE_OPTIONS: Array<{
+  label: string
+  description: string
+  value?: IgFormat
+}> = [
+  { label: 'Reel', description: 'Short vertical video with text beats.', value: 'REEL' },
+  { label: 'Carousel', description: 'Swipeable branded slides, 4:5.', value: 'CAROUSEL' },
+  { label: 'Single image', description: 'One image post or meme card.', value: 'IMAGE' },
+  { label: 'Story', description: 'Story frames with sticker ideas.', value: 'STORY' },
+  { label: 'Surprise me', description: 'Let us pick the best type.' },
+]
 
 interface ContentPanelProps {
   appId: string
   description: string | null | undefined
+  appLogo?: string | null
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -141,14 +162,20 @@ function PieceTable({ title, items, appId, showApproved, onDelete }: ListProps) 
 }
 
 /** Content tab: one-tap generation plus Drafts and Approved lists. */
-export function ContentPanel({ appId, description }: ContentPanelProps) {
+export function ContentPanel({
+  appId,
+  description,
+  appLogo,
+}: ContentPanelProps) {
   const [items, setItems] = useState<ContentItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [used, setUsed] = useState(0)
   const [admin, setAdmin] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [missing, setMissing] = useState<string[]>([])
+  const [brandMissing, setBrandMissing] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setError(null)
@@ -167,12 +194,13 @@ export function ContentPanel({ appId, description }: ContentPanelProps) {
       )
       setUsed(usage)
       setMissing(getMissingProfileFields(description, profile.data))
+      setBrandMissing(getMissingBrandFields(profile.data.brand, appLogo))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load content')
     } finally {
       setLoading(false)
     }
-  }, [appId, description])
+  }, [appId, description, appLogo])
 
   useEffect(() => {
     void load()
@@ -194,11 +222,12 @@ export function ContentPanel({ appId, description }: ContentPanelProps) {
     }
   }
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (igFormat?: IgFormat) => {
+    setPickerOpen(false)
     setGenerating(true)
     setError(null)
     try {
-      const result = await generateContentDraft(appId)
+      const result = await generateContentDraft(appId, igFormat)
       setUsed(result.used)
       await load()
     } catch (err) {
@@ -229,7 +258,7 @@ export function ContentPanel({ appId, description }: ContentPanelProps) {
             </Button>
           ) : null}
           <Button
-            onClick={() => void handleGenerate()}
+            onClick={() => setPickerOpen(true)}
             disabled={blocked}
             className="h-10 rounded-full px-5"
           >
@@ -248,6 +277,13 @@ export function ContentPanel({ appId, description }: ContentPanelProps) {
       {missing.length ? (
         <p className="mt-6 rounded-lg border border-hairline-soft bg-hairline/60 px-4 py-3 text-sm text-ink">
           Complete the Profile tab first. Missing: {missing.join(', ')}.
+        </p>
+      ) : null}
+
+      {!missing.length && brandMissing.length ? (
+        <p className="mt-6 rounded-lg border border-hairline-soft bg-hairline/60 px-4 py-3 text-sm text-ink">
+          Carousels are off until your brand kit is complete. Missing:{' '}
+          {brandMissing.join(', ')}. Add it in the Profile tab.
         </p>
       ) : null}
 
@@ -293,6 +329,41 @@ export function ContentPanel({ appId, description }: ContentPanelProps) {
           />
         </>
       )}
+
+      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>What do you want to create?</DialogTitle>
+            <DialogDescription>
+              Pick a content type. We choose the format, persona and angle for
+              you.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {CONTENT_TYPE_OPTIONS.map((option) => {
+              const blocked = option.value === 'CAROUSEL' && brandMissing.length > 0
+              return (
+                <button
+                  key={option.label}
+                  type="button"
+                  disabled={blocked}
+                  onClick={() => void handleGenerate(option.value)}
+                  className="flex flex-col items-start gap-1 rounded-xl border border-hairline-strong p-4 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span className="text-sm font-medium text-ink">
+                    {option.label}
+                  </span>
+                  <span className="text-[13px] leading-snug text-graphite">
+                    {blocked
+                      ? `Add your brand kit first: ${brandMissing.join(', ')}.`
+                      : option.description}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

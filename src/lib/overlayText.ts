@@ -22,7 +22,7 @@ import {
  */
 
 const GOOGLE_FONTS_HREF =
-  'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Anton&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap'
+  'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Anton&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;700&family=Poppins:wght@400;500;600;700;800&family=Montserrat:wght@400;600;700;800;900&family=Lora:wght@400;600;700&family=Fraunces:wght@400;600;700;900&family=Manrope:wght@400;600;700;800&family=Work+Sans:wght@400;600;700&display=swap'
 
 /** Bare CSS font family name (no quotes, no fallbacks) for a catalog font. */
 export function overlayFontFamily(font: OverlayFontKey): string {

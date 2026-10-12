@@ -22,7 +22,27 @@ export interface FormatEntry {
   layout?: Layout;
   lineCount?: number;
   sharpen?: string;
+  slideRange?: [number, number];
+  variant?: CarouselLayout;
+  stockPolicy?: 'never' | 'allowed' | 'preferred';
 }
+
+export type CarouselLayout =
+  | 'steps'
+  | 'checklist'
+  | 'split'
+  | 'stat'
+  | 'quote'
+  | 'tier'
+  | 'cards'
+  | 'chat'
+  | 'level'
+  | 'timeline'
+  | 'grid'
+  | 'flags'
+  | 'editorial'
+  | 'template'
+  | 'poster';
 
 export type Layout = 'card' | 'grid' | 'columns' | 'stack';
 
@@ -30,6 +50,9 @@ interface FormatOverride {
   layout?: Layout;
   lineCount?: number;
   sharpen?: string;
+  slideRange?: [number, number];
+  variant?: CarouselLayout;
+  stockPolicy?: 'never' | 'allowed' | 'preferred';
 }
 
 export const PILLARS = ['PAIN', 'HOW_TO', 'RESULT', 'MYTH', 'IDENTITY'] as const;
@@ -50,12 +73,18 @@ export function pillarLabel(pillar: Pillar): string {
 const catalog = catalogJson as { systemPrompt: string; formats: FormatEntry[] };
 
 export const SYSTEM_PROMPT: string = catalog.systemPrompt;
-const overrides = overridesJson as Record<string, FormatOverride>;
+const overrides = overridesJson as unknown as Record<string, FormatOverride>;
 
-export const FORMATS: FormatEntry[] = catalog.formats.map((format) => ({
-  ...format,
-  ...(overrides[String(format.id)] ?? {}),
-}));
+export const FORMATS: FormatEntry[] = catalog.formats.map((format) => {
+  const merged: FormatEntry = {
+    ...format,
+    ...(overrides[String(format.id)] ?? {}),
+  };
+  if (merged.igFormat === 'CAROUSEL' && !merged.stockPolicy) {
+    merged.stockPolicy = 'never';
+  }
+  return merged;
+});
 
 export const TEXT_STYLE_KEYS = [
   'clean',
@@ -78,7 +107,7 @@ export interface ProfileJson {
   voice: Record<string, string>;
   proof: Record<string, unknown[]>;
   competitors: unknown[];
-  brand: Record<string, string>;
+  brand: Record<string, unknown>;
   storeUrl: string;
   ctaText: string;
 }
@@ -102,6 +131,52 @@ export function inputsSatisfied(
     }
     return true;
   });
+}
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+export interface BrandKit {
+  primary: string;
+  secondary: string;
+  accent: string;
+  headlineFont: string;
+  bodyFont: string;
+  visualStyle: string;
+  logoCorner: string;
+}
+
+/** Complete brand kit or null when anything required is missing. */
+export function readBrandKit(
+  brand: Record<string, unknown> | undefined,
+  _appLogo?: string | null,
+): BrandKit | null {
+  if (!brand) return null;
+  const colors = (brand.colors ?? {}) as Record<string, unknown>;
+  const text = (value: unknown): string =>
+    typeof value === 'string' ? value.trim() : '';
+  const primary = text(colors.primary);
+  const secondary = text(colors.secondary);
+  const accent = text(colors.accent);
+  const headlineFont = text(brand.headlineFont);
+  const bodyFont = text(brand.bodyFont);
+  if (
+    !HEX.test(primary) ||
+    !HEX.test(secondary) ||
+    !HEX.test(accent) ||
+    !headlineFont ||
+    !bodyFont
+  ) {
+    return null;
+  }
+  return {
+    primary,
+    secondary,
+    accent,
+    headlineFont,
+    bodyFont,
+    visualStyle: text(brand.visualStyle) || 'bold-minimal',
+    logoCorner: text(brand.logoCorner) || 'top-left',
+  };
 }
 
 export function pickRandom<T>(items: readonly T[]): T {

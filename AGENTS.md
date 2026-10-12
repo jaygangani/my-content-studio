@@ -167,6 +167,23 @@ infra/           CDK stack for web hosting (own package.json)
   `featureId`, `pillar`, `scriptJson`, `regenCount`, `approvedAt`; legacy
   overlay/video/audio fields are unused), `Asset` (stock media with source +
   licence per beat), `GenerationLog`, `DailyUsage`. All use `allow.owner()`.
+- **Carousels + brand kit** — `AppProfile.brand` (JSON) holds the brand kit:
+  3 colours, headline/body fonts (`BRAND_FONTS` in `src/lib/brand.ts`), logo
+  light/dark keys (optional), show-logo toggle, logo corner, one visual style per app
+  (`bold-minimal`, `warm-editorial`, `tech-clean`). Carousel formats are
+  ineligible in the Lambda until the kit is complete (`readBrandKit`).
+  Branded slides are painted by `paintCarouselSlide` in `src/lib/carousel.ts`
+  (1080x1350, 80px margins, logo corner, no pagination, typography-first; visual types
+  typography/icon/data/screenshot/stock) through `Frame.paint` /
+  `paintFrame` in `render.ts`, so preview and PNG export match. Brand logos
+  and feature screenshots are S3 keys under `media/brand/` and
+  `media/screenshots/`, resolved by `useBrandAssets`. `runCarouselQa`
+  (`src/lib/carouselQa.ts`) feeds the warn-only checklist. Carousel payloads
+  without `visual_type` render with the legacy photo + text path. Stock photos are policy-driven per format
+  (`stockPolicy` in `format-overrides.json`, default `never`; see
+  `docs/carousel-visual-strategy.md`). Carousel layout is the format's
+  `variant` (15 layouts in `src/lib/carouselLayouts.ts`, listed in that doc),
+  with matching prompt rules in the Lambda `LAYOUT_RULES`.
 - **Review + export** — `/feed` is the swipe feed (drafts across apps, `?app=`
   filter). Approve = `status: APPROVED`; discard deletes the piece and its
   assets. `PiecePreview` and the exporters both draw through

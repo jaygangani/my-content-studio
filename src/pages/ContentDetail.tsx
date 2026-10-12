@@ -5,6 +5,7 @@ import { PieceEditor } from '@/components/features/PieceEditor'
 import type { PieceEditorHandle } from '@/components/features/PieceEditor'
 import { PiecePreview } from '@/components/features/PiecePreview'
 import { Button } from '@/components/ui/button'
+import { useBrandAssets } from '@/hooks/useBrandAssets'
 import { captionBlock, exportBaseName, exportPiece } from '@/lib/export'
 import { getApp } from '@/services/apps'
 import type { AppItem } from '@/services/apps'
@@ -36,6 +37,7 @@ export function ContentDetailPage() {
   const [editing, setEditing] = useState(false)
   const [progress, setProgress] = useState<number | null>(null)
   const [copied, setCopied] = useState(false)
+  const brandAssets = useBrandAssets(appId, app?.logo)
   const [selectedRole, setSelectedRole] = useState<TextRole>('hook')
   const [frameIndex, setFrameIndex] = useState(0)
   const editorRef = useRef<PieceEditorHandle | null>(null)
@@ -75,7 +77,13 @@ export function ContentDetailPage() {
     setProgress(0)
     setError(null)
     try {
-      const result = await exportPiece(app.name, script, assets, setProgress)
+      const result = await exportPiece(
+        app.name,
+        script,
+        assets,
+        setProgress,
+        brandAssets,
+      )
       download(result.blob, result.filename)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Export failed')
@@ -136,6 +144,7 @@ export function ContentDetailPage() {
           <PiecePreview
             script={editing && preview ? preview.script : script}
             assets={editing && preview ? preview.assets : assets}
+            brandAssets={brandAssets}
             editable={editing}
             selectedRole={selectedRole}
             onSelectRole={setSelectedRole}
@@ -146,6 +155,7 @@ export function ContentDetailPage() {
           {editing ? (
             <PieceEditor
               ref={editorRef}
+              brandAssets={brandAssets}
               selectedRole={selectedRole}
               onSelectRole={setSelectedRole}
               frameIndex={frameIndex}

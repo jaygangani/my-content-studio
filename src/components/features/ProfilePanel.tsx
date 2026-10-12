@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent, ReactElement } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
+import { BrandKitFields, ImageUpload } from '@/components/features/BrandKitFields'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -21,6 +22,7 @@ import type {
 interface ProfilePanelProps {
   appId: string
   description: string | null | undefined
+  appLogo?: string | null
 }
 
 interface FieldSpec<T> {
@@ -40,6 +42,7 @@ interface RepeaterProps<T extends { id: string }> {
   limit?: number
   create: () => T
   onChange: (items: T[]) => void
+  extra?: (item: T, update: (key: FieldSpec<T>['key'], value: string) => void) => ReactElement | null
 }
 
 function Repeater<T extends { id: string }>({
@@ -51,6 +54,7 @@ function Repeater<T extends { id: string }>({
   limit,
   create,
   onChange,
+  extra,
 }: RepeaterProps<T>): ReactElement {
   const update = (id: string, key: FieldSpec<T>['key'], value: string) => {
     onChange(
@@ -126,6 +130,9 @@ function Repeater<T extends { id: string }>({
               </div>
             )
           })}
+          {extra
+            ? extra(item, (key, value) => update(item.id, key, value))
+            : null}
         </div>
       ))}
     </section>
@@ -143,7 +150,6 @@ const PERSONA_FIELDS: FieldSpec<Persona>[] = [
 const FEATURE_FIELDS: FieldSpec<Feature>[] = [
   { key: 'name', label: 'Name' },
   { key: 'benefit', label: 'One-line benefit' },
-  { key: 'screenshot', label: 'Screenshot or recording URL (optional)' },
 ]
 
 const PROOF_FIELDS: FieldSpec<ProofItem>[] = [
@@ -164,7 +170,11 @@ const COMPETITOR_FIELDS: FieldSpec<Competitor>[] = [
 ]
 
 /** Profile tab: structured app profile sent to the AI with every generation. */
-export function ProfilePanel({ appId, description }: ProfilePanelProps) {
+export function ProfilePanel({
+  appId,
+  description,
+  appLogo,
+}: ProfilePanelProps) {
   const [profile, setProfile] = useState<AppProfileData>(emptyProfile)
   const [recordId, setRecordId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -258,6 +268,14 @@ export function ProfilePanel({ appId, description }: ProfilePanelProps) {
             limit={FEATURE_LIMIT}
             create={() => ({ id: newId(), name: '', benefit: '', screenshot: '' })}
             onChange={(features) => patch({ features })}
+            extra={(feature, update) => (
+              <ImageUpload
+                label="Product screenshot (optional, used in carousels)"
+                value={feature.screenshot}
+                folder="screenshots"
+                onChange={(key) => update('screenshot', key)}
+              />
+            )}
           />
 
           <section className="flex flex-col gap-4">
@@ -308,34 +326,11 @@ export function ProfilePanel({ appId, description }: ProfilePanelProps) {
             </div>
           </section>
 
-          <section className="flex flex-col gap-4">
-            <h3 className="text-sm font-medium text-ink">Brand</h3>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="brand-colors">Primary colours</Label>
-              <Input
-                id="brand-colors"
-                value={profile.brand.primaryColors}
-                placeholder="#111111, #FFFFFF"
-                onChange={(e) =>
-                  patch({
-                    brand: { ...profile.brand, primaryColors: e.target.value },
-                  })
-                }
-                className="h-11 rounded-md border-hairline-soft"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="brand-font">Font choice</Label>
-              <Input
-                id="brand-font"
-                value={profile.brand.font}
-                onChange={(e) =>
-                  patch({ brand: { ...profile.brand, font: e.target.value } })
-                }
-                className="h-11 rounded-md border-hairline-soft"
-              />
-            </div>
-          </section>
+          <BrandKitFields
+            brand={profile.brand}
+            appLogo={appLogo}
+            onChange={(brand) => patch({ brand })}
+          />
 
           <div className="flex flex-col gap-8">
             <div>

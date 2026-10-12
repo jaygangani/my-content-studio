@@ -178,10 +178,14 @@ async function callContentApi<T>(path: string, body: object): Promise<T> {
 }
 
 /** POST /content/generate: one tap creates exactly one DRAFT piece. */
-export function generateContentDraft(appId: string): Promise<GenerationResult> {
+export function generateContentDraft(
+  appId: string,
+  igFormat?: IgFormat,
+): Promise<GenerationResult> {
   return callContentApi<GenerationResult>('/content/generate', {
     appId,
     localDate: localDateString(),
+    igFormat,
   })
 }
 

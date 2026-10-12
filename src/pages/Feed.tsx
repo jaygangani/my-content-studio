@@ -7,6 +7,7 @@ import { PieceEditor } from '@/components/features/PieceEditor'
 import type { PieceEditorHandle } from '@/components/features/PieceEditor'
 import { PiecePreview } from '@/components/features/PiecePreview'
 import { Button } from '@/components/ui/button'
+import { useBrandAssets } from '@/hooks/useBrandAssets'
 import { useSwipe } from '@/hooks/useSwipe'
 import type { SwipeDirection } from '@/hooks/useSwipe'
 import { listApps } from '@/services/apps'
@@ -49,6 +50,7 @@ export function FeedPage() {
   )
   const current = visible[0] ?? null
   const currentApp = apps.find((a) => a.id === current?.appId)
+  const brandAssets = useBrandAssets(current?.appId, currentApp?.logo)
 
   const load = useCallback(async () => {
     setError(null)
@@ -223,6 +225,7 @@ export function FeedPage() {
             <PiecePreview
               script={editing && preview ? preview.script : script}
               assets={editing && preview ? preview.assets : assets}
+              brandAssets={brandAssets}
               editable={editing}
               selectedRole={selectedRole}
               onSelectRole={setSelectedRole}
@@ -287,6 +290,7 @@ export function FeedPage() {
         {editing && script ? (
           <PieceEditor
             ref={editorRef}
+            brandAssets={brandAssets}
             selectedRole={selectedRole}
             onSelectRole={setSelectedRole}
             frameIndex={frameIndex}

@@ -1,3 +1,4 @@
+import { emptyBrand } from '@/lib/brand'
 export interface Persona {
   id: string
   name: string
@@ -50,9 +51,23 @@ export interface Competitor {
   complaints: string
 }
 
+export type LogoCorner =
+  | 'top-left'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-right'
+
+export type VisualStyle = 'bold-minimal' | 'warm-editorial' | 'tech-clean'
+
 export interface Brand {
-  primaryColors: string
-  font: string
+  colors: { primary: string; secondary: string; accent: string }
+  headlineFont: string
+  bodyFont: string
+  logoLight: string
+  logoDark: string
+  logoCorner: LogoCorner
+  showLogo: boolean
+  visualStyle: VisualStyle
 }
 
 /** Structured per-app profile sent to the AI with every generation. */
@@ -84,7 +99,7 @@ export function emptyProfile(): AppProfileData {
       offers: [],
     },
     competitors: [],
-    brand: { primaryColors: '', font: '' },
+    brand: emptyBrand(),
     storeUrl: '',
     ctaText: '',
   }

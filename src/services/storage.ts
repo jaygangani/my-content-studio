@@ -2,6 +2,24 @@ import { getUrl, remove, uploadData } from 'aws-amplify/storage'
 
 const LOGO_PREFIX = 'media/logos/'
 
+export type MediaFolder = 'logos' | 'brand' | 'screenshots'
+
+/**
+ * Uploads an image under `media/<folder>/` (authenticated path declared in
+ * `amplify/storage/resource.ts`). Returns the storage key to persist.
+ */
+export async function uploadMedia(
+  file: File,
+  folder: MediaFolder,
+): Promise<string> {
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+  const path = `media/${folder}/${Date.now()}-${safeName}`
+  const contentType = file.type || 'application/octet-stream'
+
+  await uploadData({ path, data: file, options: { contentType } }).result
+  return path
+}
+
 /**
  * Uploads a logo image to S3 under `media/logos/` (the authenticated path
  * declared in `amplify/storage/resource.ts`). Returns the storage key that

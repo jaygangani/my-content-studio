@@ -10,10 +10,17 @@ import {
   getFormat,
   inputsSatisfied,
   pickAvoiding,
+  readBrandKit,
   pickRandom,
   pillarLabel,
 } from './catalog';
-import type { FormatEntry, Pillar, ProfileJson } from './catalog';
+import type {
+  BrandKit,
+  FormatEntry,
+  IgFormat,
+  Pillar,
+  ProfileJson,
+} from './catalog';
 import { callOpenAi, estimateCost, loadOpenAiKey } from './openai';
 import { SCHEMAS } from './schemas';
 import type {
@@ -29,6 +36,7 @@ import {
   parseBannedWords,
   validatePayload,
 } from './validate';
+import type { CarouselContext } from './validate';
 
 const DAILY_LIMIT = 5;
 const MAX_SKIP_REDRAWS = 3;
@@ -133,6 +141,83 @@ function describeError(error: unknown): string {
   return 'Unknown error.';
 }
 
+const STYLE_RULES: Record<string, string> = {
+  'bold-minimal':
+    'Bold and minimal: dark slides, one accent colour per slide, heavy headlines, no more than 2 fonts.',
+  'warm-editorial':
+    'Warm and editorial: light slides, serif headline, accent only as a thin rule or number.',
+  'tech-clean':
+    'Tech and clean: near-black slides, small uppercase labels, left aligned, no decoration.',
+};
+
+const LAYOUT_RULES: Record<string, string> = {
+  steps:
+    'Layout "steps": each value slide is one numbered step. Headline = the action (verb first). Body = the detail or why. The step number is drawn for you.',
+  checklist:
+    'Layout "checklist": each value slide is one checkable item. Headline = the item. Body = one line of how or why. A checkbox is drawn for you.',
+  split:
+    'Layout "split": each value slide compares two sides. Headline = the claim or topic. Body = "left text || right text" (use || exactly once). stat_label = "Left label || Right label" such as "Myth || Fact" or "Before || After".',
+  stat:
+    'Layout "stat": each value slide is one big number. visual_type "data". stat_value = the number (from the App Profile), stat_label = what it means in one line, headline = the takeaway.',
+  quote:
+    'Layout "quote": each value slide is one bold statement. Headline = the statement (max 7 words). Body = a short attribution or follow-up line.',
+  tier:
+    'Layout "tier": each value slide is one tier. Headline = "S: Always do" style (tier letter, colon, label). Body = 2 to 4 short items separated by ||.',
+  cards:
+    'Layout "cards": each value slide is one numbered card. Headline = the card title. Body = 2 short lines of explanation.',
+  chat:
+    'Layout "chat": each value slide is a question and answer. Headline = the question as someone would ask it. Body = the answer in plain words.',
+  level:
+    'Layout "level": each value slide is the next level, easiest first. Headline = the level name (a behaviour, not "Beginner"). Body = what it looks like.',
+  timeline:
+    'Layout "timeline": each value slide is one moment in order. stat_label = the time label ("Week 1", "Day 3", "Q2"). Headline = what happened. Body = one line of detail.',
+  grid:
+    'Layout "grid": each value slide is a mini cheat sheet. Headline = the topic. Body = 3 or 4 short items separated by ||.',
+  flags:
+    'Layout "flags": each value slide is one flag. Set icon to "check" for a green flag or "x" for a red flag. Headline = the behaviour. Body = why it matters.',
+  editorial:
+    'Layout "editorial": each value slide is one chapter of a story. Headline = a strong sentence (max 7 words). Body = two short lines of narrative.',
+  template:
+    'Layout "template": each value slide shows something to copy. Headline = what it is for. Body = the copy-paste text with the parts to change in [square brackets].',
+  poster:
+    'Layout "poster": each value slide is one punchy line shown huge. Headline = the line (max 6 words). Body = one short supporting line.',
+};
+
+function carouselRules(
+  kit: BrandKit,
+  screenshots: Array<{ id: string; name: string }>,
+  stockPolicy: 'never' | 'allowed' | 'preferred',
+  variant?: string,
+): string {
+  const screenshotLine = screenshots.length
+    ? `"screenshot" (set visual to one of these feature ids: ${screenshots
+        .map((s) => `${s.id} = ${s.name}`)
+        .join('; ')})`
+    : '"screenshot" is NOT available, never use it';
+  return [
+    'Carousel rules (branded template, 1080x1350, brand kit is applied automatically):',
+    '- 5 to 8 slides. Slide 1 role "hook", the last slide role "cta", every slide between role "value".',
+    '- Slide 1: headline of max 7 words that works on its own as a hook; body at most one short line.',
+    '- Each value slide teaches exactly ONE idea: headline max 7 words, body max 2 short lines (under 22 words).',
+    '- A call to action (save, follow, comment a keyword, link in bio) appears ONLY on the last slide, once.',
+    `- visual_type per slide: "typography" (default, use for most slides), "icon" (set icon to one of check,x,arrow,bolt,star,clock,heart,target,bulb,chat), "data" (set stat_value and stat_label, use only numbers from the App Profile), ${screenshotLine}${
+      stockPolicy === 'preferred'
+        ? ', "stock" (PREFERRED for slide 1: set visual_type "stock" on slide 1 and visual to a concrete real-world scene query such as "person writing notes at a desk at night"; only slide 1, never abstract ideas)'
+        : stockPolicy === 'allowed'
+          ? ', "stock" (optional, only on slide 1, set visual to a concrete photo query; use it when a real scene helps the hook)'
+          : '. "stock" is NOT allowed for this format, never use it'
+    }.`,
+    '- Never place text over a photo. Leave unused visual, icon, stat_value and stat_label as empty strings.',
+    `- Visual style: ${STYLE_RULES[kit.visualStyle] ?? STYLE_RULES['bold-minimal']}`,
+    variant && LAYOUT_RULES[variant] ? `- ${LAYOUT_RULES[variant]}` : '',
+    variant && variant !== 'stat'
+      ? '- Use visual_type "typography" for every value slide in this layout unless told otherwise.'
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 function jsonResponse(statusCode: number, payload: unknown): ApiResult {
   return {
     statusCode,
@@ -231,6 +316,13 @@ function ownerMatches(stored: string, username: string): boolean {
   return stored === username || stored.split('::')[1] === username;
 }
 
+const IG_FORMATS: IgFormat[] = ['REEL', 'CAROUSEL', 'IMAGE', 'STORY'];
+
+function readIgFormat(value: unknown): IgFormat | undefined {
+  if (typeof value !== 'string') return undefined;
+  return IG_FORMATS.find((format) => format === value);
+}
+
 function requireString(body: Record<string, unknown>, key: string): string {
   const value = body[key];
   if (typeof value !== 'string' || !value.trim()) {
@@ -296,6 +388,8 @@ async function generateAttempt(
   profileJson: string,
   selection: Selection,
   bannedWords: string[],
+  extraRules: string,
+  carouselContext: CarouselContext,
 ): Promise<
   | { kind: 'skip'; reason: string; tokens: number; completion: number }
   | { kind: 'ok'; attempt: Attempt }
@@ -310,7 +404,9 @@ async function generateAttempt(
     feature,
     appName,
   );
-  const systemPrompt = `${SYSTEM_PROMPT}\n\n${ADDENDUM}`;
+  const systemPrompt = [SYSTEM_PROMPT, ADDENDUM, extraRules]
+    .filter(Boolean)
+    .join('\n\n');
   const schema = SCHEMAS[selection.format.igFormat];
 
   let tokens = 0;
@@ -346,7 +442,12 @@ async function generateAttempt(
     }
 
     problems = [
-      ...validatePayload(selection.format, result.payload, bannedWords),
+      ...validatePayload(
+        selection.format,
+        result.payload,
+        bannedWords,
+        carouselContext,
+      ),
       ...findInventedFacts(selection.format, result.payload, profileJson),
     ];
     log('validation', {
@@ -400,7 +501,7 @@ async function fetchAssets(
   } else if (format.igFormat === 'CAROUSEL') {
     const carousel = payload as CarouselPayload;
     for (const [index, slide] of carousel.slides.entries()) {
-      if (!slide.visual.trim()) continue;
+      if (slide.visual_type !== 'stock' || !slide.visual.trim()) continue;
       const asset = await findAsset(slide.visual, 'IMAGE');
       log('stock.image', {
         slide: index,
@@ -463,6 +564,24 @@ function toPieceFields(format: FormatEntry, payload: GeneratedPayload): PieceFie
     formatName: format.name,
     textStyle: pickRandom(TEXT_STYLE_KEYS),
     layout: format.layout,
+    variant: format.variant,
+    stockPolicy: format.igFormat === 'CAROUSEL' ? format.stockPolicy : undefined,
+    bgScheme:
+      format.igFormat === 'CAROUSEL'
+        ? pickRandom(['dark', 'light', 'tinted', 'bold'] as const)
+        : undefined,
+    hookCover:
+      format.igFormat === 'CAROUSEL'
+        ? pickRandom([
+            'classic',
+            'centered',
+            'bigtype',
+            'framed',
+            'split',
+            'badge',
+            'stripe',
+          ] as const)
+        : undefined,
     payload,
   });
 
@@ -612,6 +731,7 @@ interface RunInput {
   forced?: Selection;
   replacePieceId?: string;
   unlimited: boolean;
+  igFormat?: IgFormat;
 }
 
 async function runGeneration(input: RunInput) {
@@ -695,6 +815,25 @@ async function runGeneration(input: RunInput) {
   const bannedWords = parseBannedWords(profile.voice);
   const recent = await recentPicks(client, appId);
 
+  const brandKit = readBrandKit(profile.brand, app.logo);
+  log('brand', { complete: brandKit !== null });
+  if (input.igFormat === 'CAROUSEL' && !brandKit) {
+    throw new HttpError(
+      422,
+      'Add your brand kit (colours and fonts) in the Profile tab to generate carousels.',
+    );
+  }
+  if (input.forced?.format.igFormat === 'CAROUSEL' && !brandKit) {
+    throw new HttpError(
+      422,
+      'Add your brand kit (colours, fonts, logo) in the Profile tab to generate carousels.',
+    );
+  }
+
+  const screenshotFeatures = profile.features
+    .filter((f) => (f.screenshot ?? '').trim())
+    .map((f) => ({ id: f.id, name: f.name }));
+
   const personas = profile.personas.filter((p) => p.name?.trim());
   const features = profile.features.filter((f) => f.name?.trim());
 
@@ -705,10 +844,19 @@ async function runGeneration(input: RunInput) {
     let selection = input.forced;
     if (!selection || draw > 0) {
       const eligible = FORMATS.filter(
-        (f) => !tried.has(f.id) && inputsSatisfied(f, profile),
+        (f) =>
+          !tried.has(f.id) &&
+          (!input.igFormat || f.igFormat === input.igFormat) &&
+          inputsSatisfied(f, profile) &&
+          (f.igFormat !== 'CAROUSEL' || brandKit !== null),
       );
       if (!eligible.length) {
-        throw new HttpError(422, 'No format fits the current profile.');
+        throw new HttpError(
+          422,
+          input.igFormat
+            ? `No ${input.igFormat.toLowerCase()} format fits the current profile. Try another type.`
+            : 'No format fits the current profile.',
+        );
       }
       const pool = input.forced
         ? eligible.filter((f) => f.igFormat === input.forced?.format.igFormat)
@@ -751,6 +899,15 @@ async function runGeneration(input: RunInput) {
         profileJson,
         selection,
         bannedWords,
+        selection.format.igFormat === 'CAROUSEL' && brandKit
+          ? carouselRules(
+              brandKit,
+              screenshotFeatures,
+              selection.format.stockPolicy ?? 'never',
+              selection.format.variant,
+            )
+          : '',
+        { screenshotIds: screenshotFeatures.map((f) => f.id) },
       );
       if (result.kind === 'skip') {
         await writeLog(client, owner, {
@@ -916,6 +1073,7 @@ async function handleGenerate(event: ApiEvent): Promise<ApiResult> {
     appId: requireString(body, 'appId'),
     localDate: requireLocalDate(body),
     unlimited: isAdmin(event),
+    igFormat: readIgFormat(body.igFormat),
   });
   return jsonResponse(200, result);
 }

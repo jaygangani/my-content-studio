@@ -1,7 +1,8 @@
 import JSZip from 'jszip'
 import { loadExportMedia } from '@/lib/export/media'
 import { ensureOverlayFonts } from '@/lib/overlayText'
-import { buildFrames, drawFrame, pieceStyles, surfaceFor } from '@/lib/render'
+import type { BrandAssets } from '@/lib/carousel'
+import { buildFrames, paintFrame, pieceStyles, surfaceFor } from '@/lib/render'
 import type { Frame } from '@/lib/render'
 import type { AssetItem } from '@/services/assets'
 import type { PieceScript } from '@/types/script'
@@ -17,7 +18,7 @@ async function frameToPng(
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas is not available.')
   const media = frame.media ? await loadExportMedia(frame.media) : null
-  drawFrame(ctx, width, height, media, frame.segments, frame.scrim)
+  paintFrame(ctx, width, height, media, frame)
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => (blob ? resolve(blob) : reject(new Error('PNG encode failed.'))),
@@ -31,9 +32,10 @@ export async function renderPngs(
   script: PieceScript,
   assets: AssetItem[],
   onProgress: (fraction: number) => void,
+  brandAssets?: BrandAssets | null,
 ): Promise<Blob[]> {
   const { width, height } = surfaceFor(script.schema)
-  const frames = buildFrames(script, assets)
+  const frames = buildFrames(script, assets, brandAssets)
   await ensureOverlayFonts(pieceStyles(script))
   const out: Blob[] = []
   for (const [index, frame] of frames.entries()) {

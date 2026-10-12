@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { CarouselChecklist } from '@/components/features/CarouselChecklist'
 import { StoryTextToolbar } from '@/components/features/StoryTextToolbar'
 import type { EditScope } from '@/components/features/StoryTextToolbar'
 import { replaceAsset } from '@/services/assets'
@@ -11,7 +12,14 @@ import type { AssetItem } from '@/services/assets'
 import { searchStock, updateContent } from '@/services/content'
 import type { ContentItem, StockResult } from '@/services/content'
 import { REEL_MAX_SECONDS, REEL_MIN_SECONDS } from '@/types/script'
-import type { PieceScript, TextRole } from '@/types/script'
+import type { BrandAssets } from '@/lib/carousel'
+import { CAROUSEL_ICONS } from '@/lib/carousel'
+import type {
+  CarouselSlide,
+  CarouselVisualType,
+  PieceScript,
+  TextRole,
+} from '@/types/script'
 import { scriptCaption, scriptHashtags } from '@/types/script'
 
 interface PieceEditorProps {
@@ -21,6 +29,7 @@ interface PieceEditorProps {
   selectedRole: TextRole
   onSelectRole: (role: TextRole) => void
   frameIndex: number
+  brandAssets?: BrandAssets | null
   onClose: () => void
   onSaved: (piece: ContentItem, script: PieceScript, assets: AssetItem[]) => void
   onPreview?: (script: PieceScript, assets: AssetItem[]) => void
@@ -84,6 +93,7 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
   selectedRole,
   onSelectRole,
   frameIndex,
+  brandAssets,
   onClose,
   onSaved,
   onPreview,
@@ -159,6 +169,21 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
   const warnings = useMemo(() => textOverflow(draft), [draft])
 
   const setPayload = (next: PieceScript) => setDraft(next)
+
+  const patchSlide = (index: number, change: Partial<CarouselSlide>) =>
+    setDraft((current) =>
+      current.schema === 'CAROUSEL'
+        ? {
+            ...current,
+            payload: {
+              ...current.payload,
+              slides: current.payload.slides.map((s, i) =>
+                i === index ? { ...s, ...change } : s,
+              ),
+            },
+          }
+        : current,
+    )
 
   const runSearch = async (target: SwapTarget, query: string, page: number) => {
     setSearching(true)
@@ -304,6 +329,15 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
       </div>
 
       <div className="flex flex-col gap-6">
+          {draft.schema === 'CAROUSEL' &&
+          brandAssets &&
+          draft.payload.slides.some((s) => s.visual_type) ? (
+            <CarouselChecklist script={draft} brandAssets={brandAssets} />
+          ) : null}
+
+          {draft.schema === 'CAROUSEL' &&
+          brandAssets &&
+          draft.payload.slides.some((s) => s.visual_type) ? null : (
           <StoryTextToolbar
             script={draft}
             role={selectedRole}
@@ -314,6 +348,7 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
             frameIndex={frameIndex}
             frameCount={frameCountOf(draft)}
           />
+          )}
 
           {draft.schema === 'REEL' ? (
             <>
@@ -379,13 +414,108 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
             </>
           ) : null}
 
+          {draft.schema === 'CAROUSEL' && draft.payload.slides.some((s) => s.visual_type) ? (
+            <div className="flex flex-col gap-2">
+              <Label>Slide background</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                {(
+                  [
+                    ['dark', 'Dark'],
+                    ['light', 'Light'],
+                    ['tinted', 'Tinted'],
+                    ['bold', 'Bold colour'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={(draft.bgScheme ?? 'dark') === key}
+                    onClick={() => setPayload({ ...draft, bgScheme: key })}
+                    className={`h-9 rounded-full border px-4 text-sm transition-colors ${
+                      (draft.bgScheme ?? 'dark') === key
+                        ? 'border-ink bg-ink text-canvas'
+                        : 'border-hairline-strong text-graphite hover:bg-muted'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPayload({
+                      ...draft,
+                      bgScheme: (['dark', 'light', 'tinted', 'bold'] as const)[
+                        Math.floor(Math.random() * 4)
+                      ],
+                    })
+                  }
+                  className="h-9 rounded-full border border-hairline-strong px-4 text-sm text-graphite hover:bg-muted"
+                >
+                  Shuffle
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {draft.schema === 'CAROUSEL' && draft.payload.slides.some((s) => s.visual_type) ? (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="hook-cover">First slide design</Label>
+              <div className="flex gap-2">
+                <select
+                  id="hook-cover"
+                  value={draft.hookCover ?? 'classic'}
+                  onChange={(e) =>
+                    setPayload({
+                      ...draft,
+                      hookCover: e.target.value as NonNullable<PieceScript['hookCover']>,
+                    })
+                  }
+                  className="h-11 flex-1 rounded-md border border-hairline-strong bg-surface-card px-3 text-sm"
+                >
+                  <option value="classic">Classic (left aligned)</option>
+                  <option value="centered">Centred with rings</option>
+                  <option value="bigtype">Big type</option>
+                  <option value="framed">Framed</option>
+                  <option value="split">Colour block with icon</option>
+                  <option value="badge">Icon badge</option>
+                  <option value="stripe">Diagonal band</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const covers = [
+                      'classic',
+                      'centered',
+                      'bigtype',
+                      'framed',
+                      'split',
+                      'badge',
+                      'stripe',
+                    ] as const
+                    setPayload({
+                      ...draft,
+                      hookCover: covers[Math.floor(Math.random() * covers.length)],
+                    })
+                  }}
+                  className="h-11 rounded-full border border-hairline-strong px-4 text-sm text-graphite hover:bg-muted"
+                >
+                  Shuffle
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           {draft.schema === 'CAROUSEL'
             ? draft.payload.slides.map((slide, index) => (
                 <div
                   key={index}
                   className="flex flex-col gap-3 rounded-lg border border-hairline-soft p-4"
                 >
-                  <span className="eyebrow text-slate">Slide {index + 1}</span>
+                  <span className="eyebrow text-slate">
+                    Slide {index + 1}
+                    {slide.role ? ` · ${slide.role}` : ''}
+                  </span>
                   {field(`slide-h-${index}`, 'Headline', slide.headline, (headline) =>
                     setPayload({
                       ...draft,
@@ -413,12 +543,88 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
                       }),
                     true,
                   )}
-                  {swapButton({
-                    beatIndex: index,
-                    query: slide.visual,
-                    minSeconds: 0,
-                    type: 'IMAGE',
-                  })}
+                  {slide.visual_type ? (
+                    <>
+                      <div className="flex flex-col gap-2">
+                        <Label htmlFor={`slide-v-${index}`}>Visual</Label>
+                        <select
+                          id={`slide-v-${index}`}
+                          value={slide.visual_type}
+                          onChange={(e) =>
+                            patchSlide(index, {
+                              visual_type: e.target.value as CarouselVisualType,
+                            })
+                          }
+                          className="h-11 rounded-md border border-hairline-strong bg-surface-card px-3 text-sm"
+                        >
+                          <option value="typography">Typography only</option>
+                          <option value="icon">Icon</option>
+                          <option value="data">Big number</option>
+                          <option value="screenshot">Product screenshot</option>
+                          {draft.stockPolicy !== 'never' ||
+                          slide.visual_type === 'stock' ? (
+                            <option value="stock">Stock photo (last resort)</option>
+                          ) : null}
+                        </select>
+                      </div>
+                      {slide.visual_type === 'icon' ? (
+                        <select
+                          aria-label="Icon"
+                          value={slide.icon || 'check'}
+                          onChange={(e) => patchSlide(index, { icon: e.target.value })}
+                          className="h-11 rounded-md border border-hairline-strong bg-surface-card px-3 text-sm"
+                        >
+                          {CAROUSEL_ICONS.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+                      {slide.visual_type === 'data' ? (
+                        <>
+                          {field(`slide-sv-${index}`, 'Big number', slide.stat_value ?? '', (stat_value) =>
+                            patchSlide(index, { stat_value }),
+                          )}
+                          {field(`slide-sl-${index}`, 'Label', slide.stat_label ?? '', (stat_label) =>
+                            patchSlide(index, { stat_label }),
+                          )}
+                        </>
+                      ) : null}
+                      {slide.visual_type === 'screenshot' ? (
+                        <select
+                          aria-label="Feature screenshot"
+                          value={slide.visual}
+                          onChange={(e) => patchSlide(index, { visual: e.target.value })}
+                          className="h-11 rounded-md border border-hairline-strong bg-surface-card px-3 text-sm"
+                        >
+                          <option value="">Choose a feature screenshot</option>
+                          {(brandAssets?.features ?? [])
+                            .filter((f) => brandAssets?.screenshots[f.id])
+                            .map((f) => (
+                              <option key={f.id} value={f.id}>
+                                {f.name}
+                              </option>
+                            ))}
+                        </select>
+                      ) : null}
+                      {slide.visual_type === 'stock'
+                        ? swapButton({
+                            beatIndex: index,
+                            query: slide.visual,
+                            minSeconds: 0,
+                            type: 'IMAGE',
+                          })
+                        : null}
+                    </>
+                  ) : (
+                    swapButton({
+                      beatIndex: index,
+                      query: slide.visual,
+                      minSeconds: 0,
+                      type: 'IMAGE',
+                    })
+                  )}
                 </div>
               ))
             : null}

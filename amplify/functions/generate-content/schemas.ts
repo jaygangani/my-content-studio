@@ -23,6 +23,10 @@ export interface CarouselSlide {
   headline: string;
   body: string;
   visual: string;
+  visual_type: string;
+  icon: string;
+  stat_value: string;
+  stat_label: string;
 }
 
 export interface CarouselPayload {
@@ -99,7 +103,16 @@ export const SCHEMAS: Record<IgFormat, JsonSchema> = {
     hook_options: strArray,
     slides: {
       type: 'array',
-      items: obj({ role: str, headline: str, body: str, visual: str }),
+      items: obj({
+        role: str,
+        headline: str,
+        body: str,
+        visual: str,
+        visual_type: str,
+        icon: str,
+        stat_value: str,
+        stat_label: str,
+      }),
     },
     caption: str,
     hashtags: strArray,

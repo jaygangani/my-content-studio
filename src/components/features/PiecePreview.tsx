@@ -9,10 +9,11 @@ import {
   SkipForward,
 } from 'lucide-react'
 import { ensureOverlayFonts, groupOffsets, overlayBox } from '@/lib/overlayText'
+import type { BrandAssets } from '@/lib/carousel'
 import {
   buildFrames,
-  drawFrame,
   drawTransitionFrame,
+  paintFrame,
   pieceStyles,
   surfaceFor,
   transitionKind,
@@ -32,6 +33,7 @@ interface PiecePreviewProps {
   onSelectRole?: (role: TextRole) => void
   onMoveRole?: (role: TextRole, x: number, y: number) => void
   onFrameChange?: (index: number) => void
+  brandAssets?: BrandAssets | null
 }
 
 const SEGMENT_ROLES: Record<number, TextRole> = { 1: 'hook', 2: 'body', 3: 'cta' }
@@ -81,10 +83,11 @@ export function PiecePreview({
   onSelectRole,
   onMoveRole,
   onFrameChange,
+  brandAssets,
 }: PiecePreviewProps) {
   const frames = useMemo<Frame[]>(
-    () => buildFrames(script, assets),
-    [script, assets],
+    () => buildFrames(script, assets, brandAssets),
+    [script, assets, brandAssets],
   )
   const surface = surfaceFor(script.schema)
   const height = Math.round((PREVIEW_WIDTH * surface.height) / surface.width)
@@ -226,14 +229,7 @@ export function PiecePreview({
           { source: element, frame: current },
         )
       } else {
-        drawFrame(
-          ctx,
-          canvas.width,
-          canvas.height,
-          element,
-          current.segments,
-          current.scrim,
-        )
+        paintFrame(ctx, canvas.width, canvas.height, element, current)
       }
       if (editable) {
         const selected = current.segments.find(
