@@ -11,7 +11,9 @@ import { replaceAsset } from '@/services/assets'
 import type { AssetItem } from '@/services/assets'
 import { searchStock, updateContent } from '@/services/content'
 import type { ContentItem, StockResult } from '@/services/content'
-import { REEL_MAX_SECONDS, REEL_MIN_SECONDS } from '@/types/script'
+import { REEL_MAX_SECONDS, REEL_MIN_SECONDS, isMemeScript } from '@/types/script'
+import { MEME_LOOP_MAX, MEME_LOOP_MIN } from '@/lib/meme'
+import type { MemePayload } from '@/types/script'
 import type { BrandAssets } from '@/lib/carousel'
 import { CAROUSEL_ICONS } from '@/lib/carousel'
 import type {
@@ -48,7 +50,11 @@ function words(text: string): number {
 
 function textOverflow(script: PieceScript): string[] {
   const warnings: string[] = []
-  if (script.schema === 'REEL') {
+  if (isMemeScript(script)) {
+    if (words(script.payload.meme.texts[0]?.text ?? '') > 14) {
+      warnings.push('Meme text is over 14 words.')
+    }
+  } else if (script.schema === 'REEL') {
     script.payload.beats.forEach((beat, i) => {
       if (words(beat.text) > 10) warnings.push(`Beat ${i + 1} is over 10 words.`)
     })
@@ -159,13 +165,45 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
     previewRef.current?.(draft, localAssets)
   }, [draft, localAssets])
 
+  const isMeme = isMemeScript(draft)
   const total =
     draft.schema === 'REEL'
       ? draft.payload.beats.reduce((sum, b) => sum + (Number(b.seconds) || 0), 0)
       : 0
   const outOfRange =
     draft.schema === 'REEL' &&
+    !isMeme &&
     (total < REEL_MIN_SECONDS || total > REEL_MAX_SECONDS)
+
+  const patchMeme = (change: Partial<MemePayload>) =>
+    setDraft((current) => {
+      if (!isMemeScript(current)) return current
+      const meme = { ...current.payload.meme, ...change }
+      const text = meme.texts[0]?.text ?? ''
+      return {
+        ...current,
+        payload: {
+          ...current.payload,
+          hook: text,
+          beats: [
+            {
+              text,
+              seconds: meme.loopSeconds,
+              visual_query: '',
+            },
+          ],
+          total_seconds: meme.loopSeconds,
+          meme,
+        },
+      }
+    })
+
+  const setMemeText = (text: string) => {
+    if (!isMemeScript(draft)) return
+    patchMeme({
+      texts: [{ ...(draft.payload.meme.texts[0] ?? {}), text }],
+    })
+  }
   const warnings = useMemo(() => textOverflow(draft), [draft])
 
   const setPayload = (next: PieceScript) => setDraft(next)
@@ -308,6 +346,343 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
     </Button>
   )
 
+  const swapPanel = (
+          swap ? (
+            <div className="flex flex-col gap-3 rounded-lg border border-hairline p-4">
+              <div className="flex gap-2">
+                <Input
+                  value={swapQuery}
+                  onChange={(e) => setSwapQuery(e.target.value)}
+                  className="h-10 rounded-md border-hairline-soft"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setSwapPage(1)
+                    void runSearch(swap, swapQuery, 1)
+                  }}
+                  className="h-10 rounded-full px-4"
+                >
+                  Search
+                </Button>
+              </div>
+              {searching ? (
+                <Loader2 className="size-4 animate-spin text-slate" />
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  {results.map((result) => (
+                    <button
+                      key={result.url}
+                      type="button"
+                      onClick={() => void pickAsset(result)}
+                      className="overflow-hidden rounded-md border border-hairline-soft"
+                    >
+                      <img
+                        src={result.previewUrl}
+                        alt={result.query}
+                        className="aspect-[9/16] w-full object-cover"
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="flex justify-between">
+                <button
+                  type="button"
+                  onClick={() => setSwap(null)}
+                  className="text-sm text-graphite hover:text-ink"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = swapPage + 1
+                    setSwapPage(next)
+                    void runSearch(swap, swapQuery, next)
+                  }}
+                  className="text-sm text-graphite hover:text-ink"
+                >
+                  More results
+                </button>
+              </div>
+            </div>
+          ) : null
+  )
+
+  if (isMemeScript(draft)) {
+    const meme = draft.payload.meme
+    const text = meme.texts[0]?.text ?? ''
+    const row = 'flex flex-col gap-1.5'
+    const labelClass = 'text-[13px] font-medium text-graphite'
+    const pill = (active: boolean) =>
+      `h-8 rounded-full border px-3 text-[13px] transition-colors ${
+        active
+          ? 'border-ink bg-ink text-canvas'
+          : 'border-hairline-strong text-graphite hover:bg-muted'
+      }`
+    return (
+      <aside className="flex min-w-0 flex-col gap-4 rounded-xl border border-hairline bg-surface-card p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-heading-sm">Edit meme reel</h2>
+          <button
+            type="button"
+            aria-label="Close editor"
+            onClick={onClose}
+            className="text-graphite transition-colors hover:text-ink"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="grid gap-x-6 gap-y-4 lg:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-4">
+            <div className={row}>
+              <Label htmlFor="meme-text" className={labelClass}>
+                Meme text
+              </Label>
+              <Textarea
+                id="meme-text"
+                value={text}
+                onChange={(e) => setMemeText(e.target.value)}
+                className="min-h-16 rounded-md border-hairline-soft"
+              />
+              {meme.lineOptions.length > 1 ? (
+                <div className="flex flex-col gap-1.5">
+                  {meme.lineOptions.map((line) => (
+                    <button
+                      key={line}
+                      type="button"
+                      title={line}
+                      aria-pressed={text === line}
+                      onClick={() => setMemeText(line)}
+                      className={`truncate rounded-md border px-3 py-1.5 text-left text-[13px] transition-colors ${
+                        text === line
+                          ? 'border-ink bg-ink text-canvas'
+                          : 'border-hairline-strong text-ink hover:bg-muted'
+                      }`}
+                    >
+                      {line}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className={row}>
+              <span className={labelClass}>Text style</span>
+              <StoryTextToolbar
+                compact
+                script={draft}
+                role="hook"
+                onRoleChange={onSelectRole}
+                onChange={setPayload}
+                scope={scope}
+                onScopeChange={setScope}
+                frameIndex={0}
+                frameCount={1}
+              />
+              <p className="text-[12px] text-stone">
+                Drag the text in the preview to move it.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-4">
+            <div className={row}>
+              <Label htmlFor="meme-length" className={labelClass}>
+                Length: {meme.loopSeconds}s (video loops to fill it)
+              </Label>
+              <input
+                id="meme-length"
+                type="range"
+                min={MEME_LOOP_MIN}
+                max={MEME_LOOP_MAX}
+                step={1}
+                value={meme.loopSeconds}
+                onChange={(e) => patchMeme({ loopSeconds: Number(e.target.value) })}
+                className="w-full accent-primary"
+              />
+            </div>
+
+            <div className={row}>
+              <span className={labelClass}>Background</span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(
+                  [
+                    ['stock', 'Photo'],
+                    ['solid', 'Solid'],
+                    ['brand', 'Brand'],
+                  ] as const
+                ).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={meme.background.mode === mode}
+                    onClick={() =>
+                      patchMeme({ background: { ...meme.background, mode } })
+                    }
+                    className={pill(meme.background.mode === mode)}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <input
+                  type="color"
+                  aria-label="Background colour"
+                  value={meme.background.color || '#0a0a0a'}
+                  onChange={(e) =>
+                    patchMeme({
+                      background: { ...meme.background, color: e.target.value },
+                    })
+                  }
+                  className="h-8 w-10 cursor-pointer rounded-md border border-hairline-strong bg-transparent"
+                />
+                {meme.background.mode === 'stock'
+                  ? swapButton({
+                      beatIndex: 0,
+                      query: localAssets[0]?.query ?? '',
+                      minSeconds: 0,
+                      type: 'IMAGE',
+                    })
+                  : null}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <div className={`${row} col-span-2`}>
+                <span className={labelClass}>Video position</span>
+                <div className="flex gap-1.5">
+                  {(
+                    [
+                      ['fill', 'Fill'],
+                      ['center', 'Centre'],
+                      ['bottom', 'Bottom'],
+                    ] as const
+                  ).map(([position, label]) => (
+                    <button
+                      key={position}
+                      type="button"
+                      aria-pressed={meme.clip.position === position}
+                      onClick={() =>
+                        patchMeme({ clip: { ...meme.clip, position } })
+                      }
+                      className={pill(meme.clip.position === position)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className={row}>
+                <Label htmlFor="meme-scale" className={labelClass}>
+                  Size: {Math.round(meme.clip.scale * 100)}%
+                </Label>
+                <input
+                  id="meme-scale"
+                  type="range"
+                  min={30}
+                  max={150}
+                  step={5}
+                  value={Math.round(meme.clip.scale * 100)}
+                  onChange={(e) =>
+                    patchMeme({
+                      clip: { ...meme.clip, scale: Number(e.target.value) / 100 },
+                    })
+                  }
+                  className="w-full accent-primary"
+                />
+              </div>
+              <div className={row}>
+                <Label htmlFor="meme-volume" className={labelClass}>
+                  Sound: {Math.round(meme.clip.volume * 100)}%
+                </Label>
+                <input
+                  id="meme-volume"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={Math.round(meme.clip.volume * 100)}
+                  onChange={(e) =>
+                    patchMeme({
+                      clip: { ...meme.clip, volume: Number(e.target.value) / 100 },
+                    })
+                  }
+                  className="w-full accent-primary"
+                />
+              </div>
+            </div>
+
+            <div className={row}>
+              <Label htmlFor="edit-caption" className={labelClass}>
+                Caption
+              </Label>
+              <Textarea
+                id="edit-caption"
+                value={draft.payload.caption}
+                onChange={(e) =>
+                  setPayload({
+                    ...draft,
+                    payload: { ...draft.payload, caption: e.target.value },
+                  })
+                }
+                className="min-h-16 rounded-md border-hairline-soft"
+              />
+            </div>
+            <div className={row}>
+              <Label htmlFor="edit-tags" className={labelClass}>
+                Hashtags
+              </Label>
+              <Input
+                id="edit-tags"
+                value={hashtags}
+                onChange={(e) => setHashtags(e.target.value)}
+                className="h-9 rounded-md border-hairline-soft"
+              />
+            </div>
+          </div>
+        </div>
+
+        {swapPanel}
+
+        {warnings.length ? (
+          <ul className="text-sm text-graphite">
+            {warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        ) : null}
+
+        {error ? (
+          <p className="rounded-lg border border-hairline-soft bg-hairline/60 px-4 py-3 text-sm text-ink">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="flex justify-end gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            className="rounded-full"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={saving}
+            onClick={() => void handleSave()}
+            className="rounded-full"
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </Button>
+        </div>
+      </aside>
+    )
+  }
+
   return (
     <aside className="flex min-w-0 flex-col gap-6 rounded-xl border border-hairline bg-surface-card p-4 sm:p-6">
       <div className="flex items-start justify-between gap-4">
@@ -335,9 +710,10 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
             <CarouselChecklist script={draft} brandAssets={brandAssets} />
           ) : null}
 
-          {draft.schema === 'CAROUSEL' &&
+          {(draft.schema === 'CAROUSEL' &&
           brandAssets &&
-          draft.payload.slides.some((s) => s.visual_type) ? null : (
+          draft.payload.slides.some((s) => s.visual_type)) ||
+          (draft.schema === 'IMAGE' && brandAssets && draft.bgScheme) ? null : (
           <StoryTextToolbar
             script={draft}
             role={selectedRole}
@@ -350,7 +726,7 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
           />
           )}
 
-          {draft.schema === 'REEL' ? (
+          {draft.schema === 'REEL' && !isMeme ? (
             <>
               {draft.payload.beats.map((beat, index) => (
                 <div
@@ -414,9 +790,10 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
             </>
           ) : null}
 
-          {draft.schema === 'CAROUSEL' && draft.payload.slides.some((s) => s.visual_type) ? (
+          {(draft.schema === 'CAROUSEL' && draft.payload.slides.some((s) => s.visual_type)) ||
+          (draft.schema === 'IMAGE' && draft.bgScheme) ? (
             <div className="flex flex-col gap-2">
-              <Label>Slide background</Label>
+              <Label>{draft.schema === 'IMAGE' ? 'Background' : 'Slide background'}</Label>
               <div className="flex flex-wrap items-center gap-2">
                 {(
                   [
@@ -645,12 +1022,16 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
                   }),
                 true,
               )}
-              {swapButton({
-                beatIndex: 0,
-                query: draft.payload.visual,
-                minSeconds: 0,
-                type: 'IMAGE',
-              })}
+              {!draft.bgScheme ||
+              (draft.stockPolicy ?? 'never') !== 'never' ||
+              localAssets.length > 0
+                ? swapButton({
+                    beatIndex: 0,
+                    query: draft.payload.visual,
+                    minSeconds: 0,
+                    type: 'IMAGE',
+                  })
+                : null}
             </>
           ) : null}
 
@@ -711,68 +1092,7 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
             </ul>
           ) : null}
 
-          {swap ? (
-            <div className="flex flex-col gap-3 rounded-lg border border-hairline p-4">
-              <div className="flex gap-2">
-                <Input
-                  value={swapQuery}
-                  onChange={(e) => setSwapQuery(e.target.value)}
-                  className="h-10 rounded-md border-hairline-soft"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setSwapPage(1)
-                    void runSearch(swap, swapQuery, 1)
-                  }}
-                  className="h-10 rounded-full px-4"
-                >
-                  Search
-                </Button>
-              </div>
-              {searching ? (
-                <Loader2 className="size-4 animate-spin text-slate" />
-              ) : (
-                <div className="grid grid-cols-3 gap-2">
-                  {results.map((result) => (
-                    <button
-                      key={result.url}
-                      type="button"
-                      onClick={() => void pickAsset(result)}
-                      className="overflow-hidden rounded-md border border-hairline-soft"
-                    >
-                      <img
-                        src={result.previewUrl}
-                        alt={result.query}
-                        className="aspect-[9/16] w-full object-cover"
-                      />
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="flex justify-between">
-                <button
-                  type="button"
-                  onClick={() => setSwap(null)}
-                  className="text-sm text-graphite hover:text-ink"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = swapPage + 1
-                    setSwapPage(next)
-                    void runSearch(swap, swapQuery, next)
-                  }}
-                  className="text-sm text-graphite hover:text-ink"
-                >
-                  More results
-                </button>
-              </div>
-            </div>
-          ) : null}
+          {swapPanel}
 
           {error ? (
             <p className="rounded-lg border border-hairline-soft bg-hairline/60 px-4 py-3 text-sm text-ink">

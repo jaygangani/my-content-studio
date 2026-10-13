@@ -25,7 +25,11 @@ export interface FormatEntry {
   slideRange?: [number, number];
   variant?: CarouselLayout;
   stockPolicy?: 'never' | 'allowed' | 'preferred';
+  /** Meme reel: a stock green screen video with AI text on top. */
+  meme?: boolean;
 }
+
+export const MEME_FORMAT_ID = 9001;
 
 export type CarouselLayout =
   | 'steps'
@@ -80,21 +84,43 @@ export const FORMATS: FormatEntry[] = catalog.formats.map((format) => {
     ...format,
     ...(overrides[String(format.id)] ?? {}),
   };
-  if (merged.igFormat === 'CAROUSEL' && !merged.stockPolicy) {
+  if (
+    (merged.igFormat === 'CAROUSEL' || merged.igFormat === 'IMAGE') &&
+    !merged.stockPolicy
+  ) {
     merged.stockPolicy = 'never';
   }
   return merged;
 });
 
+FORMATS.push({
+  id: MEME_FORMAT_ID,
+  name: 'Meme Reel (Green Screen)',
+  group: 'Meme and Relatable',
+  igFormat: 'REEL',
+  igFormatLabel: 'Reel',
+  repostAs: '',
+  isMeme: true,
+  structure: 'One meme line over a looping green screen meme video.',
+  hooks: [],
+  visual: 'Green screen meme video over a stock photo or solid colour.',
+  cta: '',
+  shareTrigger: '',
+  promptTemplate: '',
+  extraRules: '',
+  requiredInputs: [],
+  meme: true,
+});
+
 export const TEXT_STYLE_KEYS = [
   'clean',
-  'impact',
+  'meme',
+  'sticker',
+  'pop',
+  'marker',
   'editorial',
-  'highlight',
   'caption',
-  'typewriter',
   'poster',
-  'whisper',
 ] as const;
 
 export function getFormat(id: number): FormatEntry | undefined {

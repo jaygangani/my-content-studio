@@ -233,6 +233,30 @@ export function validatePayload(
 
 const NUMBER_RE = /\d[\d,.]*%?/g;
 
+/** Banned-word check over plain text lines (meme reels). */
+export function findBannedWords(lines: string[], bannedWords: string[]): string[] {
+  const haystack = lines.join('\n').toLowerCase();
+  return bannedWords
+    .filter((banned) => new RegExp(`\\b${escapeRegExp(banned)}\\b`).test(haystack))
+    .map((banned) => `uses banned word "${banned}"`);
+}
+
+/** Numbers that look like statistics must exist in the profile (meme reels). */
+export function findInventedNumbers(lines: string[], profileJson: string): string[] {
+  const profileText = normalise(profileJson);
+  const problems: string[] = [];
+  for (const line of lines) {
+    for (const raw of line.match(NUMBER_RE) ?? []) {
+      const token = raw.replace(/[,.]+$/, '');
+      if (/^\d{1,2}$/.test(token)) continue;
+      if (!profileText.includes(normalise(token))) {
+        problems.push(`number "${token}" is not in the profile`);
+      }
+    }
+  }
+  return problems;
+}
+
 function normalise(text: string): string {
   return text.toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, ' ');
 }

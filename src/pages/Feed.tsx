@@ -21,7 +21,12 @@ import {
   regenerateContent,
 } from '@/services/content'
 import type { ContentItem } from '@/services/content'
-import { parseScript, scriptCaption, scriptHashtags } from '@/types/script'
+import {
+  isMemeScript,
+  parseScript,
+  scriptCaption,
+  scriptHashtags,
+} from '@/types/script'
 import type { PieceScript, TextRole } from '@/types/script'
 
 /** Swipe feed: review drafts one at a time. Right approves, left discards. */
@@ -143,7 +148,7 @@ export function FeedPage() {
     <div
       className={cn(
         'mx-auto w-full px-4 py-6 sm:px-6 sm:py-10',
-        editing ? 'max-w-5xl' : 'max-w-xl',
+        editing ? (isMemeScript(script) ? 'max-w-6xl' : 'max-w-5xl') : 'max-w-xl',
       )}
     >
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -190,7 +195,7 @@ export function FeedPage() {
         <div
           className={cn(
             'mt-8',
-            editing && 'grid items-start gap-10 md:grid-cols-[minmax(0,420px)_1fr]',
+            editing && 'grid items-start gap-10 md:grid-cols-[minmax(0,380px)_1fr]',
           )}
         >
         <div

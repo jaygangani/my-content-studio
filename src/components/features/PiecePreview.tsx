@@ -22,6 +22,8 @@ import {
 import type { Frame, FrameMedia } from '@/lib/render'
 import { cn } from '@/lib/utils'
 import type { AssetItem } from '@/services/assets'
+import { MemePreview } from '@/components/features/MemePreview'
+import { isMemeScript } from '@/types/script'
 import type { PieceScript, TextRole } from '@/types/script'
 
 interface PiecePreviewProps {
@@ -74,7 +76,23 @@ function formatTime(seconds: number): string {
  * restart, previous/next beat and a scrubber; carousels and stories step with
  * arrows. Draws via the same `drawFrame` as the exporters.
  */
-export function PiecePreview({
+export function PiecePreview(props: PiecePreviewProps) {
+  if (isMemeScript(props.script)) {
+    return (
+      <MemePreview
+        script={props.script}
+        assets={props.assets}
+        className={props.className}
+        editable={props.editable}
+        onSelectRole={props.onSelectRole}
+        onMoveRole={props.onMoveRole}
+      />
+    )
+  }
+  return <BeatPreview {...props} />
+}
+
+function BeatPreview({
   script,
   assets,
   className,

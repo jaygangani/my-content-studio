@@ -1,8 +1,11 @@
 import type { BrandAssets } from '@/lib/carousel'
+import { exportMemeReel } from '@/lib/export/meme'
 import { exportReel } from '@/lib/export/reel'
+import { memeBackgroundAsset } from '@/lib/meme'
+import { getMediaUrl } from '@/services/storage'
 import { renderPngs, zipFiles } from '@/lib/export/images'
 import type { AssetItem } from '@/services/assets'
-import { scriptCaption, scriptHashtags } from '@/types/script'
+import { isMemeScript, scriptCaption, scriptHashtags } from '@/types/script'
 import type { PieceScript } from '@/types/script'
 
 export interface ExportResult {
@@ -58,6 +61,18 @@ export async function exportPiece(
   brandAssets?: BrandAssets | null,
 ): Promise<ExportResult> {
   const base = exportBaseName(appName, script)
+
+  if (isMemeScript(script)) {
+    const clipUrl = await getMediaUrl(script.payload.meme.videoKey)
+    const background = memeBackgroundAsset(script.payload.meme, assets)
+    const result = await exportMemeReel(
+      script,
+      clipUrl,
+      background?.url ?? null,
+      onProgress,
+    )
+    return { blob: result.blob, filename: `${base}.mp4` }
+  }
 
   if (script.schema === 'REEL') {
     return {

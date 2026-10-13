@@ -181,11 +181,13 @@ async function callContentApi<T>(path: string, body: object): Promise<T> {
 export function generateContentDraft(
   appId: string,
   igFormat?: IgFormat,
+  reelKind?: 'meme',
 ): Promise<GenerationResult> {
   return callContentApi<GenerationResult>('/content/generate', {
     appId,
     localDate: localDateString(),
     igFormat,
+    reelKind,
   })
 }
 

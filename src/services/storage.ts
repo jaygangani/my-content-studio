@@ -2,7 +2,7 @@ import { getUrl, remove, uploadData } from 'aws-amplify/storage'
 
 const LOGO_PREFIX = 'media/logos/'
 
-export type MediaFolder = 'logos' | 'brand' | 'screenshots'
+export type MediaFolder = 'logos' | 'brand' | 'screenshots' | 'greenscreen'
 
 /**
  * Uploads an image under `media/<folder>/` (authenticated path declared in
@@ -48,4 +48,14 @@ export async function getLogoUrl(key: string): Promise<string> {
 export async function deleteLogo(key: string): Promise<void> {
   if (!key || key.startsWith('http')) return
   await remove({ path: key })
+}
+
+/** Resolves any stored media key to a time-limited S3 URL. */
+export async function getMediaUrl(key: string): Promise<string> {
+  return getLogoUrl(key)
+}
+
+/** Removes any stored media object from S3. */
+export async function deleteMedia(key: string): Promise<void> {
+  return deleteLogo(key)
 }

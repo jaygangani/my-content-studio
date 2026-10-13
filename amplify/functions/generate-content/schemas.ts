@@ -59,11 +59,20 @@ export interface StoryPayload {
   caption_note: string;
 }
 
+export interface MemeLinesPayload {
+  skip: string;
+  lines: string[];
+  caption: string;
+  hashtags: string[];
+  bg_query: string;
+}
+
 export type GeneratedPayload =
   | ReelPayload
   | CarouselPayload
   | ImagePayload
-  | StoryPayload;
+  | StoryPayload
+  | MemeLinesPayload;
 
 type JsonSchema = Record<string, unknown>;
 
@@ -139,3 +148,11 @@ export const SCHEMAS: Record<IgFormat, JsonSchema> = {
     caption_note: str,
   }),
 };
+
+export const MEME_SCHEMA: JsonSchema = obj({
+  skip: str,
+  lines: strArray,
+  caption: str,
+  hashtags: strArray,
+  bg_query: str,
+});

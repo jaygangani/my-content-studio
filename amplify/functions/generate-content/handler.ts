@@ -22,17 +22,20 @@ import type {
   ProfileJson,
 } from './catalog';
 import { callOpenAi, estimateCost, loadOpenAiKey } from './openai';
-import { SCHEMAS } from './schemas';
+import { MEME_SCHEMA, SCHEMAS } from './schemas';
 import type {
   CarouselPayload,
   GeneratedPayload,
   ImagePayload,
+  MemeLinesPayload,
   ReelPayload,
 } from './schemas';
 import { findAsset, searchImages, searchVideos } from './stock';
 import type { StockAsset } from './stock';
 import {
+  findBannedWords,
   findInventedFacts,
+  findInventedNumbers,
   parseBannedWords,
   validatePayload,
 } from './validate';
@@ -86,11 +89,71 @@ function logGqlErrors(step: string, errors: GqlErrors): string | null {
   return message;
 }
 
+interface MemeVideo {
+  id: string;
+  title: string;
+  keywords: string[];
+  videoKey: string;
+  keyColor: string;
+}
+
+interface MemeConfig {
+  backgroundMode: 'stock' | 'solid' | 'brand';
+  backgroundColor: string;
+  loopSeconds: number;
+  blockedVideoIds: string[];
+  position: 'fill' | 'center' | 'bottom';
+  scale: number;
+  volume: number;
+}
+
+const MEME_LOOP_MIN = 5;
+const MEME_LOOP_MAX = 30;
+const MEME_FALLBACK_COLOR = '#0a0a0a';
+
+function readMemeConfig(value: unknown): MemeConfig {
+  const raw = parseJsonField<Record<string, unknown>>(value, {});
+  const bg = (raw.background ?? {}) as Record<string, unknown>;
+  const clip = (raw.clip ?? {}) as Record<string, unknown>;
+  const mode = bg.mode === 'solid' || bg.mode === 'brand' ? bg.mode : 'stock';
+  const color =
+    typeof bg.color === 'string' && /^#[0-9a-f]{6}$/i.test(bg.color)
+      ? bg.color
+      : MEME_FALLBACK_COLOR;
+  const loop = Number(raw.loopSeconds);
+  const position =
+    clip.position === 'center' || clip.position === 'bottom'
+      ? clip.position
+      : 'fill';
+  const scale = Number(clip.scale);
+  const volume = Number(clip.volume);
+  return {
+    backgroundMode: mode,
+    backgroundColor: color,
+    loopSeconds: Number.isFinite(loop)
+      ? Math.min(MEME_LOOP_MAX, Math.max(MEME_LOOP_MIN, Math.round(loop)))
+      : 10,
+    blockedVideoIds: Array.isArray(raw.blockedVideoIds)
+      ? raw.blockedVideoIds.filter((id): id is string => typeof id === 'string')
+      : [],
+    position,
+    scale: Number.isFinite(scale) ? Math.min(1.5, Math.max(0.3, scale)) : 1,
+    volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 1,
+  };
+}
+
+interface MemeContext {
+  video: MemeVideo;
+  config: MemeConfig;
+  backgroundColor: string;
+}
+
 interface Selection {
   format: FormatEntry;
   personaId: string;
   featureId: string;
   pillar: Pillar;
+  video?: MemeVideo;
 }
 
 interface Attempt {
@@ -216,6 +279,22 @@ function carouselRules(
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+function imageRules(
+  kit: BrandKit,
+  stockPolicy: 'never' | 'allowed' | 'preferred',
+): string {
+  return [
+    'Image post rules (branded template, 1080x1350, brand kit is applied automatically):',
+    '- The text lines are painted by the template, so write only the lines. No emojis, no hashtags inside the lines.',
+    `- Visual style: ${STYLE_RULES[kit.visualStyle] ?? STYLE_RULES['bold-minimal']}`,
+    stockPolicy === 'preferred'
+      ? '- "visual": a concrete real-world scene query for a photo, such as "person writing notes at a desk at night". Never abstract ideas.'
+      : stockPolicy === 'allowed'
+        ? '- "visual": optional. Set a concrete photo scene query only when a real scene makes the joke land; otherwise return an empty string.'
+        : '- "visual": return an empty string. No photo is used for this format.',
+  ].join('\n');
 }
 
 function jsonResponse(statusCode: number, payload: unknown): ApiResult {
@@ -377,7 +456,138 @@ async function recentPicks(client: DataClient, appId: string) {
     personas: latest.map((c) => c.personaId).filter((v): v is string => !!v),
     features: latest.map((c) => c.featureId).filter((v): v is string => !!v),
     pillars: latest.map((c) => c.pillar).filter((v): v is Pillar => !!v),
+    videos: latest
+      .map((c) => {
+        const script = parseJsonField<{
+          payload?: { meme?: { videoId?: string } };
+        }>(c.scriptJson, {});
+        return script.payload?.meme?.videoId;
+      })
+      .filter((v): v is string => typeof v === 'string'),
   };
+}
+
+const MEME_SYSTEM_PROMPT = [
+  'You write the on-screen text for an Instagram meme reel for a consumer app.',
+  'A green screen meme video plays behind the text. You only write the words.',
+  'Write 3 different meme lines, each at most 12 words, that fit the clip title and keywords and the persona\'s real moment.',
+  'Rules:',
+  '- Use only facts that appear in the input. Never invent numbers, stats, reviews or offers.',
+  '- Relatable and specific beats generic. The app is named only if it is the natural punchline.',
+  '- Follow the voice. Never use banned words or forbidden claims.',
+  '- caption: at most 25 words. hashtags: 4 to 6, each starting with #.',
+  '- bg_query: a concrete 2 to 4 word photo scene for the background, or an empty string if not needed.',
+  '- If a required fact is missing, set "skip" to a short reason and leave the rest empty. Otherwise "skip" is an empty string.',
+  'Return valid JSON only.',
+].join('\n');
+
+function words(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+async function generateMemeAttempt(
+  apiKey: string,
+  model: string,
+  appName: string,
+  description: string,
+  profile: ProfileJson,
+  profileJson: string,
+  selection: Selection,
+  bannedWords: string[],
+  needsBackgroundQuery: boolean,
+): Promise<
+  | { kind: 'skip'; reason: string; tokens: number; completion: number }
+  | { kind: 'ok'; attempt: Attempt }
+> {
+  const persona = profile.personas.find((p) => p.id === selection.personaId);
+  const feature = profile.features.find((f) => f.id === selection.featureId);
+  const video = selection.video;
+  if (!video) throw new HttpError(422, 'No green screen video selected.');
+  const userPrompt = JSON.stringify({
+    app: appName,
+    about: description,
+    persona: persona && {
+      name: persona.name,
+      pain: persona.pain,
+      desiredResult: persona.desiredResult,
+      words: persona.words,
+      dailyMoments: persona.dailyMoments,
+    },
+    feature: feature && { name: feature.name, benefit: feature.benefit },
+    pillar: pillarLabel(selection.pillar),
+    voice: profile.voice,
+    cta: profile.ctaText,
+    clip: { title: video.title, keywords: video.keywords },
+    backgroundNeeded: needsBackgroundQuery,
+  });
+
+  let tokens = 0;
+  let completion = 0;
+  let problems: string[] = [];
+
+  for (let round = 0; round < 2; round += 1) {
+    const prompt = problems.length
+      ? `${userPrompt}\n\nFix these problems:\n- ${problems.join('\n- ')}`
+      : userPrompt;
+    log('openai.request', {
+      formatId: selection.format.id,
+      round,
+      model,
+      promptChars: prompt.length,
+    });
+    const result = await callOpenAi(
+      apiKey,
+      model,
+      MEME_SYSTEM_PROMPT,
+      prompt,
+      MEME_SCHEMA,
+    );
+    tokens += result.promptTokens;
+    completion += result.completionTokens;
+    const payload = result.payload as MemeLinesPayload;
+
+    const skip = payload.skip?.trim();
+    if (skip) return { kind: 'skip', reason: skip, tokens, completion };
+
+    const lines = (payload.lines ?? []).map((l) => l.trim()).filter(Boolean);
+    problems = [];
+    if (lines.length < 3) problems.push('need 3 non-empty lines');
+    lines.forEach((line, i) => {
+      if (words(line) > 14) problems.push(`line ${i + 1} is over 12 words`);
+    });
+    if (!payload.caption?.trim()) problems.push('caption is empty');
+    if (!payload.hashtags?.length) problems.push('hashtags are empty');
+    const texts = [...lines, payload.caption ?? '', ...(payload.hashtags ?? [])];
+    problems.push(
+      ...findBannedWords(texts, bannedWords),
+      ...findInventedNumbers(
+        texts.filter((t) => !t.startsWith('#')),
+        profileJson,
+      ),
+    );
+    log('validation', {
+      formatId: selection.format.id,
+      round,
+      ok: problems.length === 0,
+      problems: problems.slice(0, 6),
+    });
+    if (!problems.length) {
+      return {
+        kind: 'ok',
+        attempt: {
+          selection,
+          payload: { ...payload, lines },
+          promptTokens: tokens,
+          completionTokens: completion,
+        },
+      };
+    }
+  }
+
+  throw new HttpError(
+    422,
+    `Draft failed validation after a retry: ${problems.slice(0, 3).join('; ')}`,
+  );
 }
 
 async function generateAttempt(
@@ -478,10 +688,18 @@ async function generateAttempt(
 async function fetchAssets(
   format: FormatEntry,
   payload: GeneratedPayload,
+  meme?: MemeContext,
 ): Promise<Array<StockAsset & { beatIndex: number }>> {
   const out: Array<StockAsset & { beatIndex: number }> = [];
 
-  if (format.igFormat === 'REEL') {
+  if (format.meme) {
+    const query = (payload as MemeLinesPayload).bg_query?.trim();
+    if (meme?.config.backgroundMode === 'stock' && query) {
+      const asset = await findAsset(query, 'IMAGE').catch(() => null);
+      log('stock.image', { query, found: asset !== null });
+      if (asset) out.push({ ...asset, beatIndex: 0 });
+    }
+  } else if (format.igFormat === 'REEL') {
     const reel = payload as ReelPayload;
     for (const [index, beat] of reel.beats.entries()) {
       const asset = await findAsset(beat.visual_query, 'VIDEO', beat.seconds);
@@ -512,7 +730,7 @@ async function fetchAssets(
     }
   } else if (format.igFormat === 'IMAGE') {
     const image = payload as ImagePayload;
-    if (image.visual.trim()) {
+    if ((format.stockPolicy ?? 'never') !== 'never' && image.visual.trim()) {
       const asset = await findAsset(image.visual, 'IMAGE');
       if (asset) out.push({ ...asset, beatIndex: 0 });
     }
@@ -522,6 +740,7 @@ async function fetchAssets(
 }
 
 function contentType(format: FormatEntry): ContentTypeValue {
+  if (format.meme) return 'MEME';
   switch (format.igFormat) {
     case 'REEL':
       return 'SHORT_FORM_VIDEO';
@@ -556,7 +775,75 @@ function unifyReel(payload: ReelPayload): void {
   (payload as ReelPayload & { unified?: boolean }).unified = true;
 }
 
-function toPieceFields(format: FormatEntry, payload: GeneratedPayload): PieceFields {
+function toMemeFields(
+  format: FormatEntry,
+  payload: MemeLinesPayload,
+  meme: MemeContext,
+  hasBackgroundPhoto: boolean,
+): PieceFields {
+  const first = payload.lines[0] ?? '';
+  const mode = meme.config.backgroundMode;
+  const script = JSON.stringify({
+    schema: 'REEL',
+    formatId: format.id,
+    formatName: format.name,
+    textStyle: 'meme',
+    payload: {
+      hook: first,
+      beats: [
+        { text: first, seconds: meme.config.loopSeconds, visual_query: '' },
+      ],
+      cta: '',
+      caption: payload.caption,
+      hashtags: payload.hashtags,
+      audio_mood: '',
+      total_seconds: meme.config.loopSeconds,
+      unified: true,
+      meme: {
+        videoId: meme.video.id,
+        videoKey: meme.video.videoKey,
+        videoTitle: meme.video.title,
+        keyColor: meme.video.keyColor,
+        loopSeconds: meme.config.loopSeconds,
+        lineOptions: payload.lines,
+        texts: [{ text: first }],
+        background: {
+          mode: mode === 'stock' && !hasBackgroundPhoto ? 'solid' : mode,
+          color: meme.backgroundColor,
+        },
+        clip: {
+          position: meme.config.position,
+          scale: meme.config.scale,
+          volume: meme.config.volume,
+        },
+      },
+    },
+  });
+  return {
+    title: first,
+    caption: payload.caption,
+    hashtags: payload.hashtags,
+    scriptJson: script,
+    overlayText: null,
+    videoKeywords: meme.video.keywords,
+    videoConfigurations: null,
+  };
+}
+
+function toPieceFields(
+  format: FormatEntry,
+  payload: GeneratedPayload,
+  meme?: MemeContext,
+  hasBackgroundPhoto = false,
+): PieceFields {
+  if (format.meme && meme) {
+    return toMemeFields(
+      format,
+      payload as MemeLinesPayload,
+      meme,
+      hasBackgroundPhoto,
+    );
+  }
   if (format.igFormat === 'REEL') unifyReel(payload as ReelPayload);
   const script = JSON.stringify({
     schema: format.igFormat,
@@ -565,9 +852,12 @@ function toPieceFields(format: FormatEntry, payload: GeneratedPayload): PieceFie
     textStyle: pickRandom(TEXT_STYLE_KEYS),
     layout: format.layout,
     variant: format.variant,
-    stockPolicy: format.igFormat === 'CAROUSEL' ? format.stockPolicy : undefined,
+    stockPolicy:
+      format.igFormat === 'CAROUSEL' || format.igFormat === 'IMAGE'
+        ? format.stockPolicy
+        : undefined,
     bgScheme:
-      format.igFormat === 'CAROUSEL'
+      format.igFormat === 'CAROUSEL' || format.igFormat === 'IMAGE'
         ? pickRandom(['dark', 'light', 'tinted', 'bold'] as const)
         : undefined,
     hookCover:
@@ -732,6 +1022,23 @@ interface RunInput {
   replacePieceId?: string;
   unlimited: boolean;
   igFormat?: IgFormat;
+  reelKind?: 'meme';
+}
+
+async function listMemeVideos(client: DataClient): Promise<MemeVideo[]> {
+  const { data, errors } = await client.models.GreenScreenVideo.list({
+    limit: 1000,
+  });
+  logGqlErrors('GreenScreenVideo.list', errors);
+  return data
+    .filter((v) => v.videoKey && v.keyColor)
+    .map((v) => ({
+      id: v.id,
+      title: v.title,
+      keywords: (v.keywords ?? []).filter((k): k is string => !!k),
+      videoKey: v.videoKey,
+      keyColor: v.keyColor,
+    }));
 }
 
 async function runGeneration(input: RunInput) {
@@ -817,16 +1124,23 @@ async function runGeneration(input: RunInput) {
 
   const brandKit = readBrandKit(profile.brand, app.logo);
   log('brand', { complete: brandKit !== null });
-  if (input.igFormat === 'CAROUSEL' && !brandKit) {
+  if (
+    (input.igFormat === 'CAROUSEL' || input.igFormat === 'IMAGE') &&
+    !brandKit
+  ) {
     throw new HttpError(
       422,
-      'Add your brand kit (colours and fonts) in the Profile tab to generate carousels.',
+      'Add your brand kit (colours and fonts) in the Profile tab to generate carousels and images.',
     );
   }
-  if (input.forced?.format.igFormat === 'CAROUSEL' && !brandKit) {
+  if (
+    (input.forced?.format.igFormat === 'CAROUSEL' ||
+      input.forced?.format.igFormat === 'IMAGE') &&
+    !brandKit
+  ) {
     throw new HttpError(
       422,
-      'Add your brand kit (colours, fonts, logo) in the Profile tab to generate carousels.',
+      'Add your brand kit (colours, fonts, logo) in the Profile tab to generate carousels and images.',
     );
   }
 
@@ -836,6 +1150,33 @@ async function runGeneration(input: RunInput) {
 
   const personas = profile.personas.filter((p) => p.name?.trim());
   const features = profile.features.filter((f) => f.name?.trim());
+
+  const memeConfig = readMemeConfig(profileRows.data[0]?.memeConfig);
+  const wantMeme =
+    input.reelKind === 'meme' ||
+    Boolean(input.forced?.format.meme) ||
+    !input.igFormat;
+  const memeVideos = wantMeme
+    ? (await listMemeVideos(client)).filter(
+        (v) => !memeConfig.blockedVideoIds.includes(v.id),
+      )
+    : [];
+  const brandColors = (profile.brand.colors ?? {}) as Record<string, unknown>;
+  const brandPrimary =
+    typeof brandColors.primary === 'string' &&
+    /^#[0-9a-f]{6}$/i.test(brandColors.primary)
+      ? brandColors.primary
+      : MEME_FALLBACK_COLOR;
+  const memeBackgroundColor =
+    memeConfig.backgroundMode === 'brand'
+      ? brandPrimary
+      : memeConfig.backgroundColor;
+  if (input.reelKind === 'meme' && !memeVideos.length) {
+    throw new HttpError(
+      422,
+      'No green screen videos are available. Ask an admin to add some.',
+    );
+  }
 
   let attempt: Attempt | null = null;
   const tried = new Set<number>();
@@ -847,8 +1188,12 @@ async function runGeneration(input: RunInput) {
         (f) =>
           !tried.has(f.id) &&
           (!input.igFormat || f.igFormat === input.igFormat) &&
+          (input.forced?.format.meme || input.reelKind === 'meme'
+            ? Boolean(f.meme)
+            : !f.meme || (!input.igFormat && memeVideos.length > 0)) &&
           inputsSatisfied(f, profile) &&
-          (f.igFormat !== 'CAROUSEL' || brandKit !== null),
+          ((f.igFormat !== 'CAROUSEL' && f.igFormat !== 'IMAGE') ||
+            brandKit !== null),
       );
       if (!eligible.length) {
         throw new HttpError(
@@ -880,6 +1225,20 @@ async function runGeneration(input: RunInput) {
           input.forced?.pillar ?? pickAvoiding(PILLARS, recent.pillars),
       };
     }
+    if (selection.format.meme && !selection.video) {
+      if (!memeVideos.length) {
+        throw new HttpError(
+          422,
+          'No green screen videos are available. Ask an admin to add some.',
+        );
+      }
+      const ids = memeVideos.map((v) => v.id);
+      const chosen = pickAvoiding(ids, recent.videos);
+      selection = {
+        ...selection,
+        video: memeVideos.find((v) => v.id === chosen),
+      };
+    }
     tried.add(selection.format.id);
     log('selection', {
       draw,
@@ -891,7 +1250,19 @@ async function runGeneration(input: RunInput) {
 
     const startedAt = Date.now();
     try {
-      const result = await generateAttempt(
+      const result = selection.format.meme
+        ? await generateMemeAttempt(
+            apiKey,
+            model,
+            app.name,
+            app.description ?? '',
+            profile,
+            profileJson,
+            selection,
+            bannedWords,
+            memeConfig.backgroundMode === 'stock',
+          )
+        : await generateAttempt(
         apiKey,
         model,
         app.name,
@@ -906,7 +1277,9 @@ async function runGeneration(input: RunInput) {
               selection.format.stockPolicy ?? 'never',
               selection.format.variant,
             )
-          : '',
+          : selection.format.igFormat === 'IMAGE' && brandKit
+            ? imageRules(brandKit, selection.format.stockPolicy ?? 'never')
+            : '',
         { screenshotIds: screenshotFeatures.map((f) => f.id) },
       );
       if (result.kind === 'skip') {
@@ -946,9 +1319,22 @@ async function runGeneration(input: RunInput) {
   }
 
   const { format } = attempt.selection;
-  const assets = await fetchAssets(format, attempt.payload);
+  const memeContext: MemeContext | undefined =
+    format.meme && attempt.selection.video
+      ? {
+          video: attempt.selection.video,
+          config: memeConfig,
+          backgroundColor: memeBackgroundColor,
+        }
+      : undefined;
+  const assets = await fetchAssets(format, attempt.payload, memeContext);
   log('assets.fetched', { count: assets.length, igFormat: format.igFormat });
-  const fields = toPieceFields(format, attempt.payload);
+  const fields = toPieceFields(
+    format,
+    attempt.payload,
+    memeContext,
+    assets.length > 0,
+  );
 
   const common = {
     title: fields.title,
@@ -1074,6 +1460,7 @@ async function handleGenerate(event: ApiEvent): Promise<ApiResult> {
     localDate: requireLocalDate(body),
     unlimited: isAdmin(event),
     igFormat: readIgFormat(body.igFormat),
+    reelKind: body.reelKind === 'meme' ? 'meme' : undefined,
   });
   return jsonResponse(200, result);
 }
@@ -1135,7 +1522,7 @@ async function handleStockSearch(event: ApiEvent): Promise<ApiResult> {
 
 /**
  * HTTP API behind a Cognito JWT authorizer.
- * - POST /content/generate   { appId, localDate }
+ * - POST /content/generate   { appId, localDate, igFormat?, reelKind?: 'meme' }
  * - POST /content/regenerate { pieceId, localDate }
  * - POST /content/stock-search { query, type, page?, minSeconds? }
  */

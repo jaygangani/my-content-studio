@@ -92,3 +92,28 @@ export async function saveProfile(
   if (!result.data) throw new Error('Profile was not saved.')
   return result.data.id
 }
+
+/** Per-app meme reel configuration stored on the profile record. */
+export async function getMemeConfig(appId: string): Promise<unknown> {
+  const { data, errors } = await dataClient.models.AppProfile.list({
+    filter: { appId: { eq: appId } },
+  })
+  if (errors?.length) throw new Error(errors[0].message)
+  return parseRaw(data[0]?.memeConfig ?? null)
+}
+
+export async function saveMemeConfig(
+  appId: string,
+  config: object,
+): Promise<void> {
+  const { data, errors } = await dataClient.models.AppProfile.list({
+    filter: { appId: { eq: appId } },
+  })
+  if (errors?.length) throw new Error(errors[0].message)
+  const memeConfig = JSON.stringify(config)
+  const row = data[0]
+  const result = row
+    ? await dataClient.models.AppProfile.update({ id: row.id, memeConfig })
+    : await dataClient.models.AppProfile.create({ appId, memeConfig })
+  if (result.errors?.length) throw new Error(result.errors[0].message)
+}

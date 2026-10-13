@@ -45,8 +45,21 @@ const schema = a.schema({
       brand: a.json(),
       storeUrl: a.string(),
       ctaText: a.string(),
+      memeConfig: a.json(),
     })
     .authorization((allow) => [allow.ownerDefinedIn('owner')]),
+
+  GreenScreenVideo: a
+    .model({
+      title: a.string().required(),
+      keywords: a.string().array(),
+      videoKey: a.string().required(),
+      keyColor: a.string().required(),
+    })
+    .authorization((allow) => [
+      allow.authenticated().to(['read']),
+      allow.groups(['admin']),
+    ]),
 
   Content: a
     .model({
