@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Copy, Download, FileText, Loader2, Pencil } from 'lucide-react'
+import {
+  ArrowLeft,
+  Check,
+  Copy,
+  Download,
+  FileText,
+  Loader2,
+  Pencil,
+} from 'lucide-react'
 import { PieceEditor } from '@/components/features/PieceEditor'
 import type { PieceEditorHandle } from '@/components/features/PieceEditor'
 import { PiecePreview } from '@/components/features/PiecePreview'
@@ -11,9 +19,9 @@ import { getApp } from '@/services/apps'
 import type { AppItem } from '@/services/apps'
 import { listAssets } from '@/services/assets'
 import type { AssetItem } from '@/services/assets'
-import { formatEnum, getContent } from '@/services/content'
+import { approveContent, formatEnum, getContent } from '@/services/content'
 import type { ContentItem } from '@/services/content'
-import { parseScript } from '@/types/script'
+import { isMemeScript, parseScript } from '@/types/script'
 import type { PieceScript, TextRole } from '@/types/script'
 
 function download(blob: Blob, filename: string) {
@@ -37,6 +45,7 @@ export function ContentDetailPage() {
   const [editing, setEditing] = useState(false)
   const [progress, setProgress] = useState<number | null>(null)
   const [copied, setCopied] = useState(false)
+  const [approving, setApproving] = useState(false)
   const brandAssets = useBrandAssets(appId, app?.logo)
   const [selectedRole, setSelectedRole] = useState<TextRole>('hook')
   const [frameIndex, setFrameIndex] = useState(0)
@@ -92,6 +101,20 @@ export function ContentDetailPage() {
     }
   }
 
+  const handleApprove = async () => {
+    if (!piece) return
+    setApproving(true)
+    setError(null)
+    try {
+      const updated = await approveContent(piece.id)
+      if (updated) setPiece(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Approve failed')
+    } finally {
+      setApproving(false)
+    }
+  }
+
   const handleCopy = async () => {
     if (!script) return
     await navigator.clipboard.writeText(captionBlock(script))
@@ -108,7 +131,11 @@ export function ContentDetailPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 sm:py-10">
+    <div
+      className={`mx-auto w-full px-4 py-6 sm:px-6 sm:py-10 ${
+        editing && isMemeScript(script) ? 'max-w-6xl' : 'max-w-4xl'
+      }`}
+    >
       <div className="flex flex-wrap items-center gap-3">
         <Link
           to={`/apps/${appId}`}
@@ -210,7 +237,18 @@ export function ContentDetailPage() {
               >
                 <Pencil /> Edit
               </Button>
+              {!approved ? (
+                <Button
+                  disabled={approving}
+                  onClick={() => void handleApprove()}
+                  className="h-10 rounded-full px-5"
+                >
+                  {approving ? <Loader2 className="animate-spin" /> : <Check />}
+                  {approving ? 'Approving…' : 'Approve'}
+                </Button>
+              ) : null}
               <Button
+                variant={approved ? 'default' : 'outline'}
                 disabled={!approved || exporting}
                 onClick={() => void handleExport()}
                 className="h-10 rounded-full px-5"
@@ -223,7 +261,7 @@ export function ContentDetailPage() {
             </div>
             {!approved ? (
               <p className="text-sm text-graphite">
-                Only approved pieces can be exported. Approve it in the feed.
+                Only approved pieces can be exported. Approve it to unlock export.
               </p>
             ) : null}
           </div>
