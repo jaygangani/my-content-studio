@@ -15,7 +15,8 @@
     "deploy:web": "node scripts/deploy.mjs",
     "deploy:web:dry": "DRY_RUN=1 node scripts/deploy.mjs",
     "backend:bootstrap": "bash scripts/backend-bootstrap.sh",
-    "backend:deploy:prod": "bash scripts/backend-deploy.sh deploy",
+    "deploy:prod": "bash scripts/backend-deploy.sh deploy",
+    "deploy-prod": "bash scripts/backend-deploy.sh deploy && node scripts/deploy.mjs",
     "backend:outputs:prod": "bash scripts/backend-deploy.sh outputs"
   },
   "devDependencies": {

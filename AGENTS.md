@@ -29,7 +29,8 @@ storage), and a **PWA** service worker. The visual language follows
 1. **Never deploy or push to AWS on your own initiative.** No `ampx sandbox`,
    `ampx deploy`, `ampx pipeline-deploy`, `cdk deploy`, `npm run infra:*`,
    `npm run deploy:web`, `npm run backend:bootstrap`,
-   `npm run backend:deploy:prod`, or any command that creates/updates cloud
+   `npm run backend:deploy:prod`, `npm run deploy:prod`,
+   `npm run deploy-prod`, or any command that creates/updates cloud
    resources
    unless the user explicitly asks. Initialising/editing local
    `amplify/` files is fine. There is **no CI/pipeline configured**; the user
