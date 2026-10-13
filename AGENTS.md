@@ -106,7 +106,7 @@ src/
                  overlayText.ts (overlay fonts, canvas text burn-in),
                  render.ts (frames + drawFrame, shared by preview/export),
                  profile.ts (min-field gate), export/ (mp4, png, zip, caption)
-  pages/         Home, Apps, AppDetail, ContentDetail, Feed, Login, NotFound
+  pages/         Home, Apps, AppDetail, ContentDetail, Feed, AdminAssets, Login, NotFound
   routes/        index.tsx — lazy routes + ProtectedShell
   services/      apps.ts, profile.ts, content.ts (CRUD, generate,
                  regenerate, stock search, usage), assets.ts, storage.ts
@@ -184,6 +184,31 @@ infra/           CDK stack for web hosting (own package.json)
   `docs/carousel-visual-strategy.md`). Carousel layout is the format's
   `variant` (15 layouts in `src/lib/carouselLayouts.ts`, listed in that doc),
   with matching prompt rules in the Lambda `LAYOUT_RULES`.
+- **Single image posts** — brand-kit styled like carousels when the piece has
+  `bgScheme` (set by the Lambda; older pieces without it keep the legacy dark
+  overlay). Painted by `paintImagePost` in `src/lib/imagePost.ts` through
+  `Frame.paint` (1080x1350, same `paletteFor` schemes, logo corner and fonts as
+  carousels). Layout is chosen by `formatId` for the special memes (Nobody,
+  notifications, fake post, bell curve, Venn) and otherwise by the format
+  `layout` (`card`, `columns`, `stack`, `grid`). Brand kit is required to
+  generate them. Photos follow `stockPolicy` per format
+  (`format-overrides.json`, default `never`).
+- **Meme reels (green screen)** — a `REEL` script with `payload.meme`
+  (`MemePayload` in `src/types/script.ts`, `isMemeScript`). Three layers:
+  background (stock photo / solid / brand colour), a stock green screen video
+  chroma-keyed live in the browser (`src/lib/chromaKey.ts`, key colour is
+  admin-set per video), and one AI text block (3 line variants). Painted by
+  `paintMeme` in `src/lib/meme.ts`, shared by `MemePreview` and
+  `exportMemeReel` (`src/lib/export/meme.ts`, loops the clip to 5-30s and
+  mixes its audio as AAC when the browser can). Library = `GreenScreenVideo`
+  model (`title`, `keywords`, `videoKey` under `media/greenscreen/`,
+  `keyColor`), read by every user, written by the Cognito `admin` group via
+  `/admin/assets`. Per-app defaults live in `AppProfile.memeConfig`
+  (Configurations tab, `MemeConfigPanel`). Lambda: pseudo format id 9001
+  (`meme: true` in `catalog.ts`), video picked in code (random, avoids recent
+  picks, honours `blockedVideoIds`), compact `MEME_SCHEMA` prompt, same
+  profile gate and daily limit. Generate with `reelKind: 'meme'` or via
+  "Surprise me".
 - **Review + export** — `/feed` is the swipe feed (drafts across apps, `?app=`
   filter). Approve = `status: APPROVED`; discard deletes the piece and its
   assets. `PiecePreview` and the exporters both draw through
