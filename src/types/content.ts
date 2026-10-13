@@ -11,6 +11,13 @@ export const OVERLAY_FONTS = [
   { key: 'anton', label: 'Anton', stack: '"Anton", Impact, sans-serif' },
   { key: 'archivo', label: 'Archivo', stack: '"Archivo", system-ui, sans-serif' },
   { key: 'mono', label: 'Mono', stack: '"JetBrains Mono", ui-monospace, monospace' },
+  { key: 'montserrat', label: 'Montserrat', stack: '"Montserrat", system-ui, sans-serif' },
+  { key: 'poppins', label: 'Poppins', stack: '"Poppins", system-ui, sans-serif' },
+  { key: 'bebas', label: 'Bebas', stack: '"Bebas Neue", Impact, sans-serif' },
+  { key: 'archivoblack', label: 'Archivo Black', stack: '"Archivo Black", Impact, sans-serif' },
+  { key: 'oswald', label: 'Oswald', stack: '"Oswald", Impact, sans-serif' },
+  { key: 'bangers', label: 'Bangers', stack: '"Bangers", Impact, cursive' },
+  { key: 'marker', label: 'Marker', stack: '"Permanent Marker", "Comic Sans MS", cursive' },
 ] as const
 
 export type OverlayFontKey = (typeof OVERLAY_FONTS)[number]['key']
@@ -70,6 +77,10 @@ export const OVERLAY_TEXT_COLORS = [
   { key: 'ink', label: 'Ink', value: '#030303' },
   { key: 'amber', label: 'Amber', value: '#f59e0b' },
   { key: 'sky', label: 'Sky', value: '#38bdf8' },
+  { key: 'yellow', label: 'Yellow', value: '#ffd60a' },
+  { key: 'red', label: 'Red', value: '#ff3b30' },
+  { key: 'pink', label: 'Pink', value: '#ff4f9a' },
+  { key: 'lime', label: 'Lime', value: '#a3e635' },
 ] as const
 
 export const OVERLAY_BACKDROP_COLORS = [
@@ -77,7 +88,22 @@ export const OVERLAY_BACKDROP_COLORS = [
   { key: 'paper', label: 'Paper', value: '#ffffff' },
   { key: 'amber', label: 'Amber', value: '#f59e0b' },
   { key: 'sky', label: 'Sky', value: '#38bdf8' },
+  { key: 'yellow', label: 'Yellow', value: '#ffd60a' },
+  { key: 'red', label: 'Red', value: '#ff3b30' },
+  { key: 'pink', label: 'Pink', value: '#ff4f9a' },
+  { key: 'lime', label: 'Lime', value: '#a3e635' },
 ] as const
+
+/** Outline around the letters. Width is a fraction of the font size. */
+export const OVERLAY_STROKES = [
+  { key: 'none', label: 'No outline', width: 0 },
+  { key: 'thin', label: 'Thin outline', width: 0.09 },
+  { key: 'bold', label: 'Bold outline', width: 0.18 },
+] as const
+
+export type OverlayStroke = (typeof OVERLAY_STROKES)[number]['key']
+
+export const OVERLAY_STROKE_KEYS = OVERLAY_STROKES.map((stroke) => stroke.key)
 
 export const OVERLAY_OPACITIES = [0, 0.25, 0.55, 0.8, 1] as const
 
@@ -98,6 +124,8 @@ export interface OverlayTextStyle {
   backdrop: OverlayBackdrop
   backdrop_color: OverlayBackdropColor
   backdrop_opacity: number
+  stroke: OverlayStroke
+  stroke_color: OverlayTextColor
 }
 
 export const DEFAULT_OVERLAY_STYLE: OverlayTextStyle = {
@@ -112,6 +140,8 @@ export const DEFAULT_OVERLAY_STYLE: OverlayTextStyle = {
   backdrop: 'box',
   backdrop_color: '#030303',
   backdrop_opacity: 0.55,
+  stroke: 'none',
+  stroke_color: '#030303',
 }
 
 function pickKey<T extends string>(
@@ -184,6 +214,12 @@ export function normalizeOverlayStyle(value: unknown): OverlayTextStyle {
     backdrop_opacity: Number.isFinite(opacity)
       ? Math.min(1, Math.max(0, Math.round(opacity * 100) / 100))
       : DEFAULT_OVERLAY_STYLE.backdrop_opacity,
+    stroke: pickKey(raw.stroke, OVERLAY_STROKE_KEYS, DEFAULT_OVERLAY_STYLE.stroke),
+    stroke_color: pickHex(
+      raw.stroke_color,
+      OVERLAY_TEXT_COLORS,
+      DEFAULT_OVERLAY_STYLE.stroke_color,
+    ),
   }
 }
 

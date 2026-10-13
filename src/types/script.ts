@@ -6,6 +6,27 @@ export interface ReelBeat {
   visual_query: string
 }
 
+export type MemeBackgroundMode = 'stock' | 'solid' | 'brand'
+
+export type MemeClipPosition = 'fill' | 'center' | 'bottom'
+
+/** Green screen meme reel: background + keyed stock video + one text block. */
+export interface MemePayload {
+  videoId: string
+  videoKey: string
+  videoTitle?: string
+  keyColor: string
+  loopSeconds: number
+  lineOptions: string[]
+  texts: Array<{
+    text: string
+    anchor?: { x: number; y: number }
+    maxWidth?: number
+  }>
+  background: { mode: MemeBackgroundMode; color?: string }
+  clip: { position: MemeClipPosition; scale: number; volume: number }
+}
+
 export interface ReelPayload {
   hook: string
   beats: ReelBeat[]
@@ -15,6 +36,7 @@ export interface ReelPayload {
   audio_mood: string
   total_seconds: number
   unified?: boolean
+  meme?: MemePayload
 }
 
 export type CarouselVisualType =
@@ -74,6 +96,8 @@ export interface TextOverride {
   backdrop?: string
   backdrop_color?: string
   backdrop_opacity?: number
+  stroke?: string
+  stroke_color?: string
   position?: string
   x?: number
   y?: number
@@ -120,6 +144,13 @@ export type PieceScript =
   | (ScriptBase & { schema: 'CAROUSEL'; payload: CarouselPayload })
   | (ScriptBase & { schema: 'IMAGE'; payload: ImagePayload })
   | (ScriptBase & { schema: 'STORY'; payload: StoryPayload })
+
+/** True when the script is a green screen meme reel. */
+export function isMemeScript(
+  script: PieceScript | null | undefined,
+): script is ScriptBase & { schema: 'REEL'; payload: ReelPayload & { meme: MemePayload } } {
+  return script?.schema === 'REEL' && Boolean(script.payload.meme)
+}
 
 export const REEL_MIN_SECONDS = 15
 export const REEL_MAX_SECONDS = 30

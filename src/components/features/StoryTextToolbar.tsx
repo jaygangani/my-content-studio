@@ -34,6 +34,8 @@ interface StoryTextToolbarProps {
   onScopeChange: (scope: EditScope) => void
   frameIndex: number
   frameCount: number
+  /** One-role pieces (meme reels): looks, colour, alignment, size only. */
+  compact?: boolean
 }
 
 const FRAME_WORD: Record<PieceScript['schema'], string> = {
@@ -49,7 +51,14 @@ const ROLES: Array<{ key: TextRole; label: string }> = [
   { key: 'cta', label: 'Last line' },
 ]
 
-type Background = 'none' | 'dark' | 'light'
+type Background = 'none' | 'dark' | 'light' | 'accent'
+
+const ACCENT_BOX = '#ffd60a'
+
+const SINGLE_WEIGHT_FONTS = ['anton', 'bebas', 'bangers', 'archivoblack', 'marker']
+const CAPS_FONTS = ['anton', 'bebas', 'bangers', 'grotesk']
+const STROKE_NEXT = { none: 'thin', thin: 'bold', bold: 'none' } as const
+const STROKE_LABEL = { none: 'No outline', thin: 'Thin outline', bold: 'Bold outline' } as const
 
 type Aspect = 'font' | 'colour' | 'box' | 'size' | 'case' | 'position'
 
@@ -64,7 +73,7 @@ const ASPECTS: Array<{ key: Aspect; label: string }> = [
 
 const DEFAULT_ASPECTS: Aspect[] = ['font', 'colour', 'box', 'size', 'case']
 
-const LIGHT_TEXT = ['#ffffff', '#f2efe9', '#f59e0b', '#38bdf8']
+const LIGHT_TEXT = ['#ffffff', '#f2efe9', '#ffd60a', '#f59e0b', '#38bdf8', '#ff4f9a', '#a3e635']
 const SERIF_FONTS = ['playfair', 'instrument']
 const ROLE_SIZES: Record<TextRole, Array<'sm' | 'md' | 'lg' | 'xl'>> = {
   hook: ['md', 'lg', 'xl'],
@@ -82,14 +91,15 @@ function pick<T>(items: readonly T[]): T {
  */
 function randomCombo(aspects: Aspect[]): Record<TextRole, TextOverride> {
   const font = pick(OVERLAY_FONTS)
-  const condensed = font.key === 'anton'
-  const weight = condensed ? 400 : pick([400, 600, 700, 900] as const)
-  const box = pick(['none', 'dark', 'light', 'pill-amber'] as const)
+  const singleWeight = SINGLE_WEIGHT_FONTS.includes(font.key)
+  const weight = singleWeight ? 400 : pick([600, 700, 800, 900] as const)
+  const box = pick(['none', 'none', 'dark', 'light', 'pill-amber'] as const)
   const textColor =
     box === 'light' || box === 'pill-amber'
       ? '#030303'
       : pick(LIGHT_TEXT)
-  const uppercase = condensed || font.key === 'grotesk' ? true : Math.random() < 0.25
+  const stroke = box === 'none' ? pick(['bold', 'thin', 'none'] as const) : 'none'
+  const uppercase = CAPS_FONTS.includes(font.key) ? true : Math.random() < 0.25
   const italic = SERIF_FONTS.includes(font.key) && Math.random() < 0.5
   const vertical = pick(['top', 'center', 'bottom'] as const)
   const horizontal = pick(['center', 'center', 'left'] as const)
@@ -118,6 +128,8 @@ function randomCombo(aspects: Aspect[]): Record<TextRole, TextOverride> {
         out.backdrop_color = '#f59e0b'
         out.backdrop_opacity = 1
       }
+      out.stroke = stroke
+      out.stroke_color = '#030303'
       if (!has('colour')) {
         out.text_color =
           box === 'light' || box === 'pill-amber' ? '#030303' : '#ffffff'
@@ -148,13 +160,22 @@ function randomCombo(aspects: Aspect[]): Record<TextRole, TextOverride> {
 
 function backgroundOf(style: OverlayTextStyle): Background {
   if (style.backdrop === 'none') return 'none'
+  if (style.backdrop_color === ACCENT_BOX) return 'accent'
   return style.backdrop_color === '#ffffff' ? 'light' : 'dark'
 }
 
 const NEXT_BACKGROUND: Record<Background, Background> = {
   none: 'dark',
   dark: 'light',
-  light: 'none',
+  light: 'accent',
+  accent: 'none',
+}
+
+const BACKGROUND_LABEL: Record<Background, string> = {
+  none: 'No box',
+  dark: 'Dark box',
+  light: 'Light box',
+  accent: 'Yellow box',
 }
 
 function withBackground(
@@ -174,6 +195,16 @@ function withBackground(
       backdrop_color: '#030303',
       backdrop_opacity: 0.8,
       text_color: inkText ? '#ffffff' : style.text_color,
+      stroke: 'none',
+    }
+  }
+  if (next === 'accent') {
+    return {
+      backdrop: 'box',
+      backdrop_color: ACCENT_BOX,
+      backdrop_opacity: 1,
+      text_color: '#030303',
+      stroke: 'none',
     }
   }
   return {
@@ -181,6 +212,7 @@ function withBackground(
     backdrop_color: '#ffffff',
     backdrop_opacity: 1,
     text_color: '#030303',
+    stroke: 'none',
   }
 }
 
@@ -205,6 +237,7 @@ export function StoryTextToolbar({
   onScopeChange,
   frameIndex,
   frameCount,
+  compact = false,
 }: StoryTextToolbarProps) {
   const preset = getTextStylePreset(script.textStyle)
   const frameKey = String(frameIndex)
@@ -308,6 +341,8 @@ export function StoryTextToolbar({
         backdrop: full.backdrop,
         backdrop_color: full.backdrop_color,
         backdrop_opacity: full.backdrop_opacity,
+        stroke: full.stroke,
+        stroke_color: full.stroke_color,
         position,
       }
     }
@@ -370,7 +405,137 @@ export function StoryTextToolbar({
       backdrop: full.backdrop,
       backdrop_color: full.backdrop_color,
       backdrop_opacity: full.backdrop_opacity,
+      stroke: full.stroke,
+      stroke_color: full.stroke_color,
     })
+  }
+
+  if (compact) {
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Font style">
+          {TEXT_STYLE_PRESETS.map((item) => {
+            const sample = resolveTextStyle(item, role)
+            const active =
+              style.font === sample.font &&
+              style.weight === sample.weight &&
+              style.uppercase === sample.uppercase &&
+              style.italic === sample.italic
+            return (
+              <button
+                key={item.key}
+                type="button"
+                aria-pressed={active}
+                onClick={() => applyLook(item.key)}
+                title={item.description}
+                className={cn(
+                  'flex h-8 items-center gap-1.5 rounded-full border px-3 transition-colors',
+                  active
+                    ? 'border-ink bg-ink text-canvas'
+                    : 'border-hairline-strong bg-surface-card text-ink hover:bg-muted',
+                )}
+              >
+                <span
+                  className="text-base leading-none"
+                  style={{
+                    fontFamily: overlayFontStack(sample.font),
+                    fontWeight: sample.weight,
+                    fontStyle: sample.italic ? 'italic' : 'normal',
+                    textTransform: sample.uppercase ? 'uppercase' : 'none',
+                  }}
+                >
+                  Aa
+                </span>
+                <span className="text-[13px]">{item.label}</span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="flex items-center gap-1.5" role="group" aria-label="Text colour">
+            {OVERLAY_TEXT_COLORS.map((color) => (
+              <button
+                key={color.key}
+                type="button"
+                title={color.label}
+                aria-label={color.label}
+                aria-pressed={style.text_color === color.value}
+                onClick={() => patch({ text_color: color.value })}
+                className={cn(
+                  'size-6 rounded-full border-2 border-white outline outline-1 outline-hairline-strong',
+                  style.text_color === color.value && 'outline-2 outline-ink',
+                )}
+                style={{ backgroundColor: color.value }}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            aria-label="Change alignment"
+            onClick={() => patch({ align: ALIGN_NEXT[style.align] })}
+            className="flex size-8 items-center justify-center rounded-full border border-hairline-strong bg-surface-card text-ink hover:bg-muted"
+          >
+            <AlignIcon className="size-4" />
+          </button>
+          <button
+            type="button"
+            aria-label="Change background"
+            onClick={() =>
+              patch(withBackground(style, NEXT_BACKGROUND[background]))
+            }
+            className={cn(
+              'flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px]',
+              background === 'none' &&
+                'border-hairline-strong bg-surface-card text-ink',
+              background === 'dark' && 'border-ink bg-ink text-canvas',
+              background === 'light' && 'border-hairline-strong bg-white text-ink',
+              background === 'accent' && 'border-ink bg-[#ffd60a] text-ink',
+            )}
+          >
+            <Type className="size-3.5" />
+            {BACKGROUND_LABEL[background]}
+          </button>
+          <button
+            type="button"
+            aria-label="Change outline"
+            onClick={() => patch({ stroke: STROKE_NEXT[style.stroke] })}
+            className={cn(
+              'flex h-8 items-center rounded-full border px-3 text-[13px]',
+              style.stroke === 'none'
+                ? 'border-hairline-strong bg-surface-card text-ink'
+                : 'border-ink bg-ink text-canvas',
+            )}
+          >
+            {STROKE_LABEL[style.stroke]}
+          </button>
+          <div className="flex min-w-24 flex-1 items-center gap-2">
+            <span className="text-xs text-graphite">A</span>
+            <input
+              type="range"
+              min={0}
+              max={OVERLAY_SIZES.length - 1}
+              step={1}
+              value={sizeIndex}
+              aria-label="Text size"
+              onChange={(e) =>
+                patch({ size: OVERLAY_SIZES[Number(e.target.value)].key })
+              }
+              className="w-full accent-primary"
+            />
+            <span className="text-base leading-none text-graphite">A</span>
+          </div>
+          {hasOverrides ? (
+            <button
+              type="button"
+              onClick={reset}
+              className="inline-flex items-center gap-1 text-[13px] text-graphite hover:text-ink"
+            >
+              <RotateCcw className="size-3.5" /> Reset
+            </button>
+          ) : null}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -614,14 +779,24 @@ export function StoryTextToolbar({
               'border-hairline-strong bg-surface-card text-ink',
             background === 'dark' && 'border-ink bg-ink text-canvas',
             background === 'light' && 'border-hairline-strong bg-white text-ink',
+            background === 'accent' && 'border-ink bg-[#ffd60a] text-ink',
           )}
         >
           <Type className="size-4" />
-          {background === 'none'
-            ? 'No background'
-            : background === 'dark'
-              ? 'Dark background'
-              : 'Light background'}
+          {BACKGROUND_LABEL[background]}
+        </button>
+        <button
+          type="button"
+          aria-label="Change outline"
+          onClick={() => patch({ stroke: STROKE_NEXT[style.stroke] })}
+          className={cn(
+            'flex h-10 items-center rounded-full border px-4 text-sm',
+            style.stroke === 'none'
+              ? 'border-hairline-strong bg-surface-card text-ink'
+              : 'border-ink bg-ink text-canvas',
+          )}
+        >
+          {STROKE_LABEL[style.stroke]}
         </button>
         <div className="flex min-w-32 flex-1 items-center gap-2">
           <span className="text-xs text-graphite">A</span>

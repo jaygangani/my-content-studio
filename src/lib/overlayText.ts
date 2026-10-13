@@ -5,6 +5,7 @@ import {
   OVERLAY_BACKDROP_COLORS,
   OVERLAY_FONTS,
   OVERLAY_SIZES,
+  OVERLAY_STROKES,
   OVERLAY_TEXT_COLORS,
   OVERLAY_TRACKING,
   type OverlayAlign,
@@ -22,7 +23,7 @@ import {
  */
 
 const GOOGLE_FONTS_HREF =
-  'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Anton&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;700&family=Poppins:wght@400;500;600;700;800&family=Montserrat:wght@400;600;700;800;900&family=Lora:wght@400;600;700&family=Fraunces:wght@400;600;700;900&family=Manrope:wght@400;600;700;800&family=Work+Sans:wght@400;600;700&display=swap'
+  'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Anton&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;700&family=Poppins:wght@400;500;600;700;800&family=Montserrat:wght@400;600;700;800;900&family=Lora:wght@400;600;700&family=Fraunces:wght@400;600;700;900&family=Manrope:wght@400;600;700;800&family=Work+Sans:wght@400;600;700&family=Bebas+Neue&family=Archivo+Black&family=Oswald:wght@500;700&family=Bangers&family=Permanent+Marker&display=swap'
 
 /** Bare CSS font family name (no quotes, no fallbacks) for a catalog font. */
 export function overlayFontFamily(font: OverlayFontKey): string {
@@ -55,6 +56,17 @@ export function overlayTextColorHex(style: OverlayTextStyle): string {
   return (
     OVERLAY_TEXT_COLORS.find((entry) => entry.value === style.text_color)?.value ??
     DEFAULT_OVERLAY_STYLE.text_color
+  )
+}
+
+export function overlayStrokeWidth(style: OverlayTextStyle): number {
+  return OVERLAY_STROKES.find((entry) => entry.key === style.stroke)?.width ?? 0
+}
+
+export function overlayStrokeColorHex(style: OverlayTextStyle): string {
+  return (
+    OVERLAY_TEXT_COLORS.find((entry) => entry.value === style.stroke_color)
+      ?.value ?? DEFAULT_OVERLAY_STYLE.stroke_color
   )
 }
 
@@ -103,6 +115,16 @@ export function overlayTextCss(style: OverlayTextStyle): CSSProperties {
     textTransform: style.uppercase ? 'uppercase' : 'none',
     textAlign: style.align,
     color: overlayTextColorHex(style),
+    ...(overlayStrokeWidth(style) > 0
+      ? {
+          WebkitTextStroke: `${(
+            overlaySizeScale(style.size) *
+            200 *
+            overlayStrokeWidth(style)
+          ).toFixed(3)}cqw ${overlayStrokeColorHex(style)}`,
+          paintOrder: 'stroke fill',
+        }
+      : {}),
     backgroundColor:
       style.backdrop === 'none'
         ? 'transparent'
@@ -349,11 +371,12 @@ export function drawOverlay(
   }
 
   ctx.fillStyle = overlayTextColorHex(style)
+  const strokeWidth = overlayStrokeWidth(style) * fontSize
   const shadowed = style.backdrop === 'none'
   if (shadowed) {
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.55)'
-    ctx.shadowBlur = Math.round(fontSize * 0.3)
-    ctx.shadowOffsetY = Math.round(fontSize * 0.05)
+    ctx.shadowColor = strokeWidth > 0 ? 'rgba(0, 0, 0, 0.35)' : 'rgba(0, 0, 0, 0.55)'
+    ctx.shadowBlur = Math.round(fontSize * (strokeWidth > 0 ? 0.12 : 0.3))
+    ctx.shadowOffsetY = Math.round(fontSize * (strokeWidth > 0 ? 0.04 : 0.05))
   }
   const textX =
     style.align === 'left'
@@ -362,6 +385,15 @@ export function drawOverlay(
         ? x + boxWidth - padX
         : x + boxWidth / 2
   lines.forEach((line, index) => {
+    if (strokeWidth > 0) {
+      ctx.save()
+      ctx.lineJoin = 'round'
+      ctx.miterLimit = 2
+      ctx.lineWidth = strokeWidth * 2
+      ctx.strokeStyle = overlayStrokeColorHex(style)
+      ctx.strokeText(line, textX, y + padY + index * lineHeight)
+      ctx.restore()
+    }
     ctx.fillText(line, textX, y + padY + index * lineHeight)
   })
   if (shadowed) {
