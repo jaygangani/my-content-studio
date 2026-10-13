@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { MoreVertical, Sparkles } from 'lucide-react'
+import { MoreVertical, Shuffle, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -39,17 +39,38 @@ import {
 import type { ContentItem, IgFormat } from '@/services/content'
 import { parseScript } from '@/types/script'
 
-const CONTENT_TYPE_OPTIONS: Array<{
+interface TypeOption {
   label: string
   description: string
+  beta?: boolean
   value?: IgFormat
-}> = [
-  { label: 'Reel', description: 'Short vertical video with text beats.', value: 'REEL' },
-  { label: 'Carousel', description: 'Swipeable branded slides, 4:5.', value: 'CAROUSEL' },
-  { label: 'Single image', description: 'One image post or meme card.', value: 'IMAGE' },
-  { label: 'Story', description: 'Story frames with sticker ideas.', value: 'STORY' },
-  { label: 'Surprise me', description: 'Let us pick the best type.' },
+  reelKind?: 'meme'
+}
+
+const REEL_OPTIONS: TypeOption[] = [
+  {
+    label: 'Meme reel',
+    description: 'Green screen meme video over a background, with a meme line.',
+    value: 'REEL',
+    reelKind: 'meme',
+  },
+  {
+    label: 'Video reel',
+    description: 'Stock video beats with a text line on each.',
+    value: 'REEL',
+    beta: true,
+  },
 ]
+
+const OTHER_OPTIONS: TypeOption[] = [
+  { label: 'Carousel', description: 'Swipeable branded slides, 4:5.', value: 'CAROUSEL' },
+  { label: 'Single image', description: 'One branded image post or meme card, 4:5.', value: 'IMAGE' },
+  { label: 'Story', description: 'Story frames with sticker ideas.', value: 'STORY', beta: true },
+]
+
+function BetaTag() {
+  return <span className="text-xs font-normal text-stone">Beta</span>
+}
 
 interface ContentPanelProps {
   appId: string
@@ -222,12 +243,12 @@ export function ContentPanel({
     }
   }
 
-  const handleGenerate = async (igFormat?: IgFormat) => {
+  const handleGenerate = async (igFormat?: IgFormat, reelKind?: 'meme') => {
     setPickerOpen(false)
     setGenerating(true)
     setError(null)
     try {
-      const result = await generateContentDraft(appId, igFormat)
+      const result = await generateContentDraft(appId, igFormat, reelKind)
       setUsed(result.used)
       await load()
     } catch (err) {
@@ -282,7 +303,7 @@ export function ContentPanel({
 
       {!missing.length && brandMissing.length ? (
         <p className="mt-6 rounded-lg border border-hairline-soft bg-hairline/60 px-4 py-3 text-sm text-ink">
-          Carousels are off until your brand kit is complete. Missing:{' '}
+          Carousels and single images are off until your brand kit is complete. Missing:{' '}
           {brandMissing.join(', ')}. Add it in the Profile tab.
         </p>
       ) : null}
@@ -335,32 +356,57 @@ export function ContentPanel({
           <DialogHeader>
             <DialogTitle>What do you want to create?</DialogTitle>
             <DialogDescription>
-              Pick a content type. We choose the format, persona and angle for
-              you.
+              Pick a content type. We choose the persona and angle for you.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {CONTENT_TYPE_OPTIONS.map((option) => {
-              const blocked = option.value === 'CAROUSEL' && brandMissing.length > 0
-              return (
-                <button
-                  key={option.label}
-                  type="button"
-                  disabled={blocked}
-                  onClick={() => void handleGenerate(option.value)}
-                  className="flex flex-col items-start gap-1 rounded-xl border border-hairline-strong p-4 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <span className="text-sm font-medium text-ink">
-                    {option.label}
-                  </span>
-                  <span className="text-[13px] leading-snug text-graphite">
-                    {blocked
-                      ? `Add your brand kit first: ${brandMissing.join(', ')}.`
-                      : option.description}
-                  </span>
-                </button>
-              )
-            })}
+          {[
+            { title: 'Reels', options: REEL_OPTIONS },
+            { title: 'Other', options: OTHER_OPTIONS },
+          ].map((group) => (
+            <div key={group.title} className="flex flex-col gap-2">
+              <span className="eyebrow text-slate">{group.title}</span>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {group.options.map((option) => {
+                  const brandBlocked =
+                    (option.value === 'CAROUSEL' || option.value === 'IMAGE') &&
+                    brandMissing.length > 0
+                  const blocked = brandBlocked || Boolean(option.beta)
+                  return (
+                    <button
+                      key={option.label}
+                      type="button"
+                      disabled={blocked}
+                      onClick={() =>
+                        void handleGenerate(option.value, option.reelKind)
+                      }
+                      className="flex flex-col items-start gap-1 rounded-xl border border-hairline-strong p-4 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                    >
+                      <span className="flex w-full items-center justify-between gap-2 text-sm font-medium text-ink">
+                        {option.label}
+                        {option.beta ? <BetaTag /> : null}
+                      </span>
+                      <span className="text-[13px] leading-snug text-graphite">
+                        {brandBlocked
+                          ? `Add your brand kit first: ${brandMissing.join(', ')}.`
+                          : option.beta
+                            ? `${option.description} Coming soon.`
+                            : option.description}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+          <div className="flex justify-end border-t border-hairline pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleGenerate()}
+              className="h-10 rounded-full px-5"
+            >
+              <Shuffle /> Create random
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
