@@ -1,7 +1,8 @@
 {
   "17": {
     "layout": "card",
-    "sharpen": "Caption must name one exact situation and one exact reaction, in the persona's own words. One sentence. No 'when you' filler like 'when things get hard'. Good: 'Me when the tutorial says 'just' and then lists 14 steps.' Bad: 'Me when learning is tough.'"
+    "sharpen": "Caption must name one exact situation and one exact reaction, in the persona's own words. One sentence. No 'when you' filler like 'when things get hard'. Good: 'Me when the tutorial says 'just' and then lists 14 steps.' Bad: 'Me when learning is tough.'",
+    "stockPolicy": "allowed"
   },
   "18": {
     "layout": "columns",
@@ -20,7 +21,8 @@
   },
   "21": {
     "layout": "card",
-    "sharpen": "Format: 'Tell me you [identity] without telling me you [identity].' then a second line with the tell. The tell must be a small physical or digital habit (what is on their screen, what is in their bag, what they search at 1am), never a trait or feeling."
+    "sharpen": "Format: 'Tell me you [identity] without telling me you [identity].' then a second line with the tell. The tell must be a small physical or digital habit (what is on their screen, what is in their bag, what they search at 1am), never a trait or feeling.",
+    "stockPolicy": "allowed"
   },
   "61": {
     "sharpen": "Each slide is one different meme with a different tension. No two slides may share the same joke mechanic. Every slide names a concrete moment, object or search term the persona recognises. Slide 1 is the strongest. Last slide ties back to the app naturally, without selling.",
@@ -70,16 +72,18 @@
   },
   "70": {
     "layout": "card",
-    "sharpen": "One headline in newspaper voice, 8-14 words, with an invented outlet name and a quoted invented expert. Subject is a specific everyday behaviour in this niche treated as a crisis. Include one precise number or time. Never mention real people, accounts, or news."
+    "sharpen": "One headline in newspaper voice, 8-14 words, with an invented outlet name and a quoted invented expert. Subject is a specific everyday behaviour in this niche treated as a crisis. Include one precise number or time. Never mention real people, accounts, or news.",
+    "stockPolicy": "allowed"
   },
   "71": {
     "layout": "stack",
     "lineCount": 3,
-    "sharpen": "Write exactly 3 lines for a fake post: line 1 is '@invented_handle', line 2 is the post text (max 22 words, in the first person, with a very specific detail), line 3 is 'N likes \u00b7 M comments' with absurdly specific numbers. The post must sound like something this persona would genuinely type."
+    "sharpen": "Write exactly 3 lines for a fake post: line 1 is '@invented_handle', line 2 is the post text (max 22 words, in the first person, with a very specific detail), line 3 is 'N likes · M comments' with absurdly specific numbers. The post must sound like something this persona would genuinely type."
   },
   "72": {
     "layout": "card",
-    "sharpen": "The image prompt is a single weird, specific scene (an object, a place, a posture) that invites a caption; write that scene in visual_query-style concrete words. Provide the framing line 'Caption this:' only; do not give the caption."
+    "sharpen": "The image prompt is a single weird, specific scene (an object, a place, a posture) that invites a caption; write that scene in visual_query-style concrete words. Provide the framing line 'Caption this:' only; do not give the caption.",
+    "stockPolicy": "preferred"
   },
   "4": {
     "sharpen": "Each rule is an imperative with a concrete object, number or time, never a value like 'be consistent'. Rules must contradict a habit the persona currently believes in. Bad: 'Practice daily'. Good: 'Stop re-watching. Close the video at minute 3 and do one thing.'"
@@ -209,5 +213,8 @@
   },
   "54": {
     "variant": "timeline"
+  },
+  "53": {
+    "stockPolicy": "allowed"
   }
 }

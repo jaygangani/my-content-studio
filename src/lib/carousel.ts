@@ -6,6 +6,7 @@ import {
   coverDraw,
   drawIcon,
   fitText,
+  hexToRgb,
   luminance,
   mix,
   nearestWeight,
@@ -44,9 +45,9 @@ export interface SlideReport {
 
 export const CAROUSEL_WIDTH = 1080
 export const CAROUSEL_HEIGHT = 1350
-const MARGIN = 80
+export const MARGIN = 80
 
-interface Palette {
+export interface Palette {
   background: string
   alt: string
   text: string
@@ -97,7 +98,7 @@ export type BackgroundScheme = 'dark' | 'light' | 'tinted' | 'bold'
 
 export const BACKGROUND_SCHEMES: BackgroundScheme[] = ['dark', 'light', 'tinted', 'bold']
 
-function paletteFor(
+export function paletteFor(
   brand: Brand,
   role: 'hook' | 'value' | 'cta',
   index: number,
@@ -191,34 +192,94 @@ function paletteFor(
   }
 }
 
-type DecorKind = 'blob' | 'rings' | 'dots' | 'stripes' | 'grid' | 'none'
+export type DecorKind =
+  | 'blob'
+  | 'rings'
+  | 'dots'
+  | 'stripes'
+  | 'grid'
+  | 'orbs'
+  | 'none'
 
 function decorFor(
-  style: string,
-  role: 'hook' | 'value' | 'cta',
-  index: number,
+  _style: string,
+  _role: 'hook' | 'value' | 'cta',
+  _index: number,
   visualType: string,
 ): DecorKind {
   if (visualType === 'stock' || visualType === 'screenshot') return 'none'
-  if (style === 'tech-clean') return role === 'value' && index % 2 === 0 ? 'dots' : 'grid'
-  if (style === 'warm-editorial') {
-    if (role === 'hook') return 'rings'
-    if (role === 'cta') return 'blob'
-    return index % 2 === 0 ? 'dots' : 'none'
-  }
-  if (role === 'hook') return 'blob'
-  if (role === 'cta') return 'rings'
-  return index % 2 === 0 ? 'stripes' : 'dots'
+  return 'orbs'
 }
 
-function drawDecor(
+function withAlpha(hex: string, alpha: number): string {
+  const [r, g, b] = hexToRgb(hex)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function softOrb(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  color: string,
+  alpha: number,
+) {
+  const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius)
+  gradient.addColorStop(0, withAlpha(color, alpha))
+  gradient.addColorStop(0.45, withAlpha(color, alpha * 0.55))
+  gradient.addColorStop(0.75, withAlpha(color, alpha * 0.16))
+  gradient.addColorStop(1, withAlpha(color, 0))
+  ctx.fillStyle = gradient
+  ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2)
+}
+
+/** Large out-of-focus colour glows. Radial falloff, so no blur filter needed. */
+const ORB_LAYOUTS: Array<Array<[number, number, number, 0 | 1]>> = [
+  [[0.95, 0.06, 560, 0], [0.02, 0.98, 500, 1], [0.7, 0.62, 300, 1]],
+  [[0.04, 0.3, 600, 0], [0.98, 0.9, 520, 1], [0.8, 0.05, 280, 1]],
+  [[0.9, 0.94, 600, 0], [0.05, 0.04, 480, 1], [0.35, 0.55, 280, 1]],
+  [[0.5, -0.04, 640, 0], [0.96, 0.7, 460, 1], [0.0, 0.85, 380, 1]],
+]
+
+function drawOrbs(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  palette: Palette,
+  seed: number,
+) {
+  const dark = luminance(palette.background) < 0.4
+  const second = dark
+    ? mix(palette.accent, '#ffffff', 0.5)
+    : mix(palette.accent, palette.text, 0.35)
+  const layout = ORB_LAYOUTS[((seed % 4) + 4) % 4]
+  ctx.save()
+  for (const [fx, fy, radius, tone2] of layout) {
+    softOrb(
+      ctx,
+      fx * width,
+      fy * height,
+      radius,
+      tone2 ? second : palette.accent,
+      dark ? (tone2 ? 0.34 : 0.62) : tone2 ? 0.22 : 0.5,
+    )
+  }
+  ctx.restore()
+}
+
+export function drawDecor(
   ctx: CanvasRenderingContext2D,
   kind: DecorKind,
   width: number,
   height: number,
   palette: Palette,
+  seed = 0,
 ) {
   if (kind === 'none') return
+  if (kind === 'orbs') {
+    drawOrbs(ctx, width, height, palette, seed)
+    return
+  }
   ctx.save()
   if (kind === 'blob') {
     ctx.fillStyle = palette.decor
@@ -325,7 +386,7 @@ function drawDevice(
   ctx.fill()
 }
 
-function pickLogo(
+export function pickLogo(
   assets: BrandAssets,
   background: string,
 ): HTMLImageElement | null {
@@ -389,12 +450,12 @@ export function paintCarouselSlide(
   const textX = centered ? width / 2 : MARGIN
   const coverDecor: Record<HookCover, DecorKind | null> = {
     classic: null,
-    centered: 'rings',
-    bigtype: 'none',
+    centered: 'orbs',
+    bigtype: 'orbs',
     framed: 'none',
     split: 'none',
-    badge: 'dots',
-    stripe: 'stripes',
+    badge: 'orbs',
+    stripe: 'orbs',
   }
   const customLayout =
     role === 'value' &&
@@ -411,22 +472,8 @@ export function paintCarouselSlide(
     width,
     height,
     palette,
+    index,
   )
-  if (
-    !customLayout &&
-    role === 'value' &&
-    visualType === 'typography' &&
-    index % 2 === 1
-  ) {
-    drawIcon(
-      ctx,
-      watermarkIcon(slide, index),
-      width - MARGIN - 150,
-      height - MARGIN - 330,
-      380,
-      mix(palette.background, palette.accent, 0.2),
-    )
-  }
   ctx.textBaseline = 'top'
   ctx.textAlign = 'left'
 

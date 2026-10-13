@@ -10,6 +10,7 @@ import {
 import type { AssetItem } from '@/services/assets'
 import type { PieceScript, PieceSchema } from '@/types/script'
 import { paintCarouselSlide } from '@/lib/carousel'
+import { paintImagePost } from '@/lib/imagePost'
 import type { BrandAssets } from '@/lib/carousel'
 import { drawOverlay, groupOffsets } from '@/lib/overlayText'
 
@@ -183,6 +184,34 @@ export function buildFrames(
     }
     case 'IMAGE': {
       const lines = script.payload.text_lines.filter((line) => line.trim())
+      if (brandAssets && script.bgScheme) {
+        const stock = mediaFor(assets, 0)
+        return [
+          {
+            id: 'image',
+            seconds: STILL_SECONDS,
+            media: stock,
+            segments: [],
+            scrim: 0,
+            paint: (ctx, width, height, source) => {
+              paintImagePost(
+                ctx,
+                width,
+                height,
+                {
+                  lines,
+                  layout: script.layout,
+                  formatId: script.formatId,
+                  formatName: script.formatName,
+                  scheme: script.bgScheme,
+                },
+                brandAssets,
+                source,
+              )
+            },
+          },
+        ]
+      }
       const cell = (size: OverlayTextStyle['size']): OverlayTextStyle => ({
         ...body,
         size,
