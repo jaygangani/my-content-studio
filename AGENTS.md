@@ -114,7 +114,9 @@ src/
                  (S3), http.ts
   types/         shared API/content/profile/script/theme types
 scripts/         build-formats.ts (docs 72-formats md → seed-data/formats.json),
-                 seed-formats.ts (writes formats + prompts to DynamoDB),
+                 migrate-reels.ts (content type/subtype + StockAsset migration),
+                 lib/admin-client.ts (shared admin sign-in for scripts),
+                 seed-formats.ts (writes formats + prompts via GraphQL as an admin),
                  seed-data/ (formats.json, format-overrides.json, prompts.json),
                  deploy.mjs + write-env-deploy.mjs (S3/CloudFront),
                  backend-bootstrap.sh + backend-deploy.sh (prod backend)
@@ -149,16 +151,29 @@ infra/           CDK stack for web hosting (own package.json)
   `/content/stock-search`. Base URL is in `amplify_outputs.json` →
   `custom.GENERATE_CONTENT_API_URL`; frontend calls live in
   `src/services/content.ts`. **Formats and prompt wording are data, not code:**
-  the `FormatDef` and `PromptSnippet` tables hold the 72 formats, the meme and
-  viral rows (`kind` meme/viral selects the pipeline) and every AI text
-  (system prompt, addendum, meme/viral prompts, carousel/image rules, layout
-  and style rules). Admins edit them at `/admin/formats`; `store.ts` loads
-  them with a 60 s cache and fails with a 503 "not seeded" when empty.
+  the `FormatDef` and `PromptSnippet` tables hold the formats and every AI text
+  (system prompt, addendum, reel subtype prompts, carousel/image rules, layout
+  and style rules). **Formats belong to a content type** (`contentType`:
+  reel | carousel | image | story). Reels are further split by a fixed
+  **subtype** key (`reel.green-screen`, `reel.tweet-style`, `reel.video-beats`;
+  registry in `src/lib/reelSubtypes.ts`, mirrored by `subtype`/`assetCategory`
+  on `FormatDef`): the subtype selects the pipeline and the editor, admins add
+  and disable formats under it. Carousel, image and story stay flat. Admins
+  work at `/admin/content` (content type → subtype → formats, plus the Stock
+  library and Prompts tabs); `store.ts` loads formats and prompts with a 60 s
+  cache and fails with a 503 "not seeded" when empty. Stock assets live in the
+  unified `StockAsset` table (`category`: green-screen, viral-clip, …); formats
+  point at a category and can pin specific assets (`assetIds`). Per-app reel
+  settings are in `AppProfile.reelConfig[subtype]` (falls back to the older
+  `memeConfig` / `viralConfig`). Legacy tables are read only until
+  `npm run migrate:reels` has copied them.
   `POST /content/test-generate` (admin) runs one format without saving;
   `POST /content/draft-format` (admin) turns a free-text description into a
   filled format form using the `admin.format_draft` prompt snippet.
   Seed once with `npm run seed:formats` (only when the user asks; reads
-  `scripts/seed-data/`, insert-only unless `--overwrite`). Modules:
+  `scripts/seed-data/`, writes through the GraphQL API as an admin user using
+  `amplify_outputs.json` or `--outputs <file>`, insert-only unless
+  `--overwrite`). Modules:
   `catalog.ts` (types, input gating, picks), `store.ts` (DB loaders),
   `schemas.ts` (strict JSON schemas), `validate.ts` (FR-3.4 checks +
   invented-fact check), `stock.ts` (Pexels), `openai.ts`, `handler.ts`
@@ -195,7 +210,7 @@ infra/           CDK stack for web hosting (own package.json)
   `media/screenshots/`, resolved by `useBrandAssets`. `runCarouselQa`
   (`src/lib/carouselQa.ts`) feeds the warn-only checklist. Carousel payloads
   without `visual_type` render with the legacy photo + text path. Stock photos are policy-driven per format
-  (`stockPolicy` on the format in `/admin/formats`, default `never`; see
+  (`stockPolicy` on the format in `/admin/content`, default `never`; see
   `docs/carousel-visual-strategy.md`). Carousel layout is the format's
   `variant` (15 layouts in `src/lib/carouselLayouts.ts`, listed in that doc),
   with matching prompt rules in the `layout.<variant>` prompt snippets.
@@ -207,34 +222,28 @@ infra/           CDK stack for web hosting (own package.json)
   notifications, fake post, bell curve, Venn) and otherwise by the format
   `layout` (`card`, `columns`, `stack`, `grid`). Brand kit is required to
   generate them. Photos follow `stockPolicy` per format
-  (set in `/admin/formats`, default `never`).
-- **Meme reels (green screen)** — a `REEL` script with `payload.meme`
-  (`MemePayload` in `src/types/script.ts`, `isMemeScript`). Three layers:
-  background (stock photo / solid / brand colour), a stock green screen video
+  (set in `/admin/content`, default `never`).
+- **Meme reels (`reel.green-screen`)** — a `REEL` script with `payload.meme`
+  (`MemePayload`, `isMemeScript`, `script.subtype`). Three layers: background
+  (stock photo / solid / brand colour), a stock green screen video
   chroma-keyed live in the browser (`src/lib/chromaKey.ts`, key colour is
-  admin-set per video), and one AI text block (3 line variants). Painted by
+  admin-set per asset) and one AI text block (3 line variants). Painted by
   `paintMeme` in `src/lib/meme.ts`, shared by `MemePreview` and
   `exportMemeReel` (`src/lib/export/meme.ts`, loops the clip to 5-30s and
-  mixes its audio as AAC when the browser can). Library = `GreenScreenVideo`
-  model (`title`, `keywords`, `videoKey` under `media/greenscreen/`,
-  `keyColor`), read by every user, written by the Cognito `admin` group via
-  `/admin/assets`. Per-app defaults live in `AppProfile.memeConfig`
-  (Configurations tab, `MemeConfigPanel`). Lambda: pseudo format id 9001
-  (`kind: meme` row in `FormatDef`), video picked in code (random, avoids recent
-  picks, honours `blockedVideoIds`), compact `MEME_SCHEMA` prompt, same
-  profile gate and daily limit. Generate with `reelKind: 'meme'` or via
-  "Surprise me".
-- **Viral clip reels** — a `REEL` script with `payload.viral` (`ViralPayload`,
-  `isViralScript`): a black header with one tweet-style line and a stock viral
-  video full width under it, played once (max 30s) with its audio. Painted by
+  mixes its audio as AAC when the browser can). Assets: `StockAsset` category
+  `green-screen` (S3 `media/stock/`). Per-app defaults: `reelConfig` card in
+  Configurations (`MemeConfigPanel`). Lambda: the shared compact pipeline
+  (`generateCompactAttempt`) with the subtype default prompt plus the format's
+  own instructions/hooks/rules; clip picked in code (random, avoids recent
+  picks, honours blocked and pinned ids); same profile gate and daily limit.
+- **Tweet-style reels (`reel.tweet-style`)** — a `REEL` script with
+  `payload.viral` (`ViralPayload`, `isViralScript`): a black header with one
+  tweet-style line and a stock viral video full width under it, played once
+  (max 30s) with its audio. Also covers "viral clip with wording". Painted by
   `paintViral` in `src/lib/viral.ts`, shared by `ViralPreview` and
   `exportViralReel` (`src/lib/export/viral.ts`; audio helpers in
-  `src/lib/export/audio.ts`). Library = `ViralVideo` model (`title`,
-  `keywords`, `videoKey` under `media/viral/`, `durationSeconds`), managed in
-  the Viral clips tab of `/admin/assets`. Per-app block list and sound live in
-  `AppProfile.viralConfig` (`ViralConfigPanel`). Lambda: pseudo format id 9002
-  (`viral: true`), clip picked in code (random, avoids recent picks), compact
-  prompt from clip title and keywords, 3 line variants.
+  `src/lib/export/audio.ts`). Assets: `StockAsset` category `viral-clip`.
+  Same compact Lambda pipeline as meme reels.
 - **Review + export** — `/feed` is the swipe feed (drafts across apps, `?app=`
   filter). Approve = `status: APPROVED`; discard deletes the piece and its
   assets. `PiecePreview` and the exporters both draw through

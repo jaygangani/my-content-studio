@@ -1,7 +1,7 @@
 # Carousel visual strategy
 
 Applies to every carousel format (1080 x 1350, 4:5). Enforced in code through
-`stockPolicy` on the format (admin screen `/admin/formats`, seeded from
+`stockPolicy` on the format (admin screen `/admin/content`, seeded from
 `scripts/seed-data/format-overrides.json`)
 (prompt rules, validation, editor options and the quality checklist).
 
@@ -73,7 +73,7 @@ library and brand look stay consistent.
 
 ## Changing the policy
 
-Set the format's **Stock photo** field in `/admin/formats` (`never`,
+Set the format's **Stock photo** field in `/admin/content` (`never`,
 `allowed` or `preferred`; unspecified carousels default to `never`). No code
 change or deploy needed.
 
