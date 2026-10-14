@@ -113,7 +113,9 @@ src/
                  regenerate, stock search, usage), assets.ts, storage.ts
                  (S3), http.ts
   types/         shared API/content/profile/script/theme types
-scripts/         build-formats.ts (docs 72-formats md → formats.json),
+scripts/         build-formats.ts (docs 72-formats md → seed-data/formats.json),
+                 seed-formats.ts (writes formats + prompts to DynamoDB),
+                 seed-data/ (formats.json, format-overrides.json, prompts.json),
                  deploy.mjs + write-env-deploy.mjs (S3/CloudFront),
                  backend-bootstrap.sh + backend-deploy.sh (prod backend)
 infra/           CDK stack for web hosting (own package.json)
@@ -146,13 +148,25 @@ infra/           CDK stack for web hosting (own package.json)
   JWT authorizer**; routes `POST /content/generate`, `/content/regenerate`,
   `/content/stock-search`. Base URL is in `amplify_outputs.json` →
   `custom.GENERATE_CONTENT_API_URL`; frontend calls live in
-  `src/services/content.ts`. Modules: `catalog.ts` (72 formats from
-  `formats.json`, input gating, picks), `schemas.ts` (4 strict JSON schemas),
-  `validate.ts` (FR-3.4 checks + invented-fact check), `stock.ts` (Pexels),
-  `openai.ts`, `handler.ts` (pipeline: profile gate → daily limit → pick →
-  prompt → validate/retry/skip → stock → write). Regenerate `formats.json`
-  with `npx tsx scripts/build-formats.ts` after editing
-  `docs/72-short-form-content-formats (2).md`. The Lambda sets `owner`
+  `src/services/content.ts`. **Formats and prompt wording are data, not code:**
+  the `FormatDef` and `PromptSnippet` tables hold the 72 formats, the meme and
+  viral rows (`kind` meme/viral selects the pipeline) and every AI text
+  (system prompt, addendum, meme/viral prompts, carousel/image rules, layout
+  and style rules). Admins edit them at `/admin/formats`; `store.ts` loads
+  them with a 60 s cache and fails with a 503 "not seeded" when empty.
+  `POST /content/test-generate` (admin) runs one format without saving;
+  `POST /content/draft-format` (admin) turns a free-text description into a
+  filled format form using the `admin.format_draft` prompt snippet.
+  Seed once with `npm run seed:formats` (only when the user asks; reads
+  `scripts/seed-data/`, insert-only unless `--overwrite`). Modules:
+  `catalog.ts` (types, input gating, picks), `store.ts` (DB loaders),
+  `schemas.ts` (strict JSON schemas), `validate.ts` (FR-3.4 checks +
+  invented-fact check), `stock.ts` (Pexels), `openai.ts`, `handler.ts`
+  (pipeline: profile gate → daily limit → pick → prompt → validate/retry/skip
+  → stock → write). Regenerate `scripts/seed-data/formats.json` with
+  `npx tsx scripts/build-formats.ts` after editing
+  `docs/72-short-form-content-formats (2).md`, then seed with `--overwrite`
+  if you want the docs to replace admin edits. The Lambda sets `owner`
   (`sub::username` from the JWT) on every row it writes, otherwise
   `allow.owner()` hides it from the user. Limit is 5 per app per
   user-local day (`DailyUsage`, id `appId#YYYY-MM-DD`); members of the Cognito
@@ -181,10 +195,10 @@ infra/           CDK stack for web hosting (own package.json)
   `media/screenshots/`, resolved by `useBrandAssets`. `runCarouselQa`
   (`src/lib/carouselQa.ts`) feeds the warn-only checklist. Carousel payloads
   without `visual_type` render with the legacy photo + text path. Stock photos are policy-driven per format
-  (`stockPolicy` in `format-overrides.json`, default `never`; see
+  (`stockPolicy` on the format in `/admin/formats`, default `never`; see
   `docs/carousel-visual-strategy.md`). Carousel layout is the format's
   `variant` (15 layouts in `src/lib/carouselLayouts.ts`, listed in that doc),
-  with matching prompt rules in the Lambda `LAYOUT_RULES`.
+  with matching prompt rules in the `layout.<variant>` prompt snippets.
 - **Single image posts** — brand-kit styled like carousels when the piece has
   `bgScheme` (set by the Lambda; older pieces without it keep the legacy dark
   overlay). Painted by `paintImagePost` in `src/lib/imagePost.ts` through
@@ -193,7 +207,7 @@ infra/           CDK stack for web hosting (own package.json)
   notifications, fake post, bell curve, Venn) and otherwise by the format
   `layout` (`card`, `columns`, `stack`, `grid`). Brand kit is required to
   generate them. Photos follow `stockPolicy` per format
-  (`format-overrides.json`, default `never`).
+  (set in `/admin/formats`, default `never`).
 - **Meme reels (green screen)** — a `REEL` script with `payload.meme`
   (`MemePayload` in `src/types/script.ts`, `isMemeScript`). Three layers:
   background (stock photo / solid / brand colour), a stock green screen video
@@ -206,10 +220,21 @@ infra/           CDK stack for web hosting (own package.json)
   `keyColor`), read by every user, written by the Cognito `admin` group via
   `/admin/assets`. Per-app defaults live in `AppProfile.memeConfig`
   (Configurations tab, `MemeConfigPanel`). Lambda: pseudo format id 9001
-  (`meme: true` in `catalog.ts`), video picked in code (random, avoids recent
+  (`kind: meme` row in `FormatDef`), video picked in code (random, avoids recent
   picks, honours `blockedVideoIds`), compact `MEME_SCHEMA` prompt, same
   profile gate and daily limit. Generate with `reelKind: 'meme'` or via
   "Surprise me".
+- **Viral clip reels** — a `REEL` script with `payload.viral` (`ViralPayload`,
+  `isViralScript`): a black header with one tweet-style line and a stock viral
+  video full width under it, played once (max 30s) with its audio. Painted by
+  `paintViral` in `src/lib/viral.ts`, shared by `ViralPreview` and
+  `exportViralReel` (`src/lib/export/viral.ts`; audio helpers in
+  `src/lib/export/audio.ts`). Library = `ViralVideo` model (`title`,
+  `keywords`, `videoKey` under `media/viral/`, `durationSeconds`), managed in
+  the Viral clips tab of `/admin/assets`. Per-app block list and sound live in
+  `AppProfile.viralConfig` (`ViralConfigPanel`). Lambda: pseudo format id 9002
+  (`viral: true`), clip picked in code (random, avoids recent picks), compact
+  prompt from clip title and keywords, 3 line variants.
 - **Review + export** — `/feed` is the swipe feed (drafts across apps, `?app=`
   filter). Approve = `status: APPROVED`; discard deletes the piece and its
   assets. `PiecePreview` and the exporters both draw through
