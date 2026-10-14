@@ -21,7 +21,7 @@ import { listAssets } from '@/services/assets'
 import type { AssetItem } from '@/services/assets'
 import { approveContent, formatEnum, getContent } from '@/services/content'
 import type { ContentItem } from '@/services/content'
-import { isMemeScript, parseScript } from '@/types/script'
+import { isMemeScript, isViralScript, parseScript } from '@/types/script'
 import type { PieceScript, TextRole } from '@/types/script'
 
 function download(blob: Blob, filename: string) {
@@ -133,7 +133,7 @@ export function ContentDetailPage() {
   return (
     <div
       className={`mx-auto w-full px-4 py-6 sm:px-6 sm:py-10 ${
-        editing && isMemeScript(script) ? 'max-w-6xl' : 'max-w-4xl'
+        editing && (isMemeScript(script) || isViralScript(script)) ? 'max-w-6xl' : 'max-w-4xl'
       }`}
     >
       <div className="flex flex-wrap items-center gap-3">

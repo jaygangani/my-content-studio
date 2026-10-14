@@ -117,3 +117,42 @@ export async function saveMemeConfig(
     : await dataClient.models.AppProfile.create({ appId, memeConfig })
   if (result.errors?.length) throw new Error(result.errors[0].message)
 }
+
+/** Per-app viral clip reel configuration stored on the profile record. */
+export interface ViralConfig {
+  blockedVideoIds: string[]
+  volume: number
+}
+
+export async function getViralConfig(appId: string): Promise<ViralConfig> {
+  const { data, errors } = await dataClient.models.AppProfile.list({
+    filter: { appId: { eq: appId } },
+  })
+  if (errors?.length) throw new Error(errors[0].message)
+  const raw = parseRaw(data[0]?.viralConfig ?? null)
+  const record =
+    typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
+  const volume = Number(record.volume)
+  return {
+    blockedVideoIds: Array.isArray(record.blockedVideoIds)
+      ? record.blockedVideoIds.filter((id): id is string => typeof id === 'string')
+      : [],
+    volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 1,
+  }
+}
+
+export async function saveViralConfig(
+  appId: string,
+  config: ViralConfig,
+): Promise<void> {
+  const { data, errors } = await dataClient.models.AppProfile.list({
+    filter: { appId: { eq: appId } },
+  })
+  if (errors?.length) throw new Error(errors[0].message)
+  const viralConfig = JSON.stringify(config)
+  const row = data[0]
+  const result = row
+    ? await dataClient.models.AppProfile.update({ id: row.id, viralConfig })
+    : await dataClient.models.AppProfile.create({ appId, viralConfig })
+  if (result.errors?.length) throw new Error(result.errors[0].message)
+}

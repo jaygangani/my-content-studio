@@ -11,9 +11,14 @@ import { replaceAsset } from '@/services/assets'
 import type { AssetItem } from '@/services/assets'
 import { searchStock, updateContent } from '@/services/content'
 import type { ContentItem, StockResult } from '@/services/content'
-import { REEL_MAX_SECONDS, REEL_MIN_SECONDS, isMemeScript } from '@/types/script'
+import {
+  REEL_MAX_SECONDS,
+  REEL_MIN_SECONDS,
+  isMemeScript,
+  isViralScript,
+} from '@/types/script'
 import { MEME_LOOP_MAX, MEME_LOOP_MIN } from '@/lib/meme'
-import type { MemePayload } from '@/types/script'
+import type { MemePayload, ViralPayload } from '@/types/script'
 import type { BrandAssets } from '@/lib/carousel'
 import { CAROUSEL_ICONS } from '@/lib/carousel'
 import type {
@@ -173,6 +178,7 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
   const outOfRange =
     draft.schema === 'REEL' &&
     !isMeme &&
+    !isViralScript(draft) &&
     (total < REEL_MIN_SECONDS || total > REEL_MAX_SECONDS)
 
   const patchMeme = (change: Partial<MemePayload>) =>
@@ -197,6 +203,29 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
         },
       }
     })
+
+  const patchViral = (change: Partial<ViralPayload>) =>
+    setDraft((current) => {
+      if (!isViralScript(current)) return current
+      const viral = { ...current.payload.viral, ...change }
+      const text = viral.texts[0]?.text ?? ''
+      return {
+        ...current,
+        payload: {
+          ...current.payload,
+          hook: text,
+          beats: [
+            { text, seconds: viral.durationSeconds, visual_query: '' },
+          ],
+          viral,
+        },
+      }
+    })
+
+  const setViralText = (text: string) => {
+    if (!isViralScript(draft)) return
+    patchViral({ texts: [{ ...(draft.payload.viral.texts[0] ?? {}), text }] })
+  }
 
   const setMemeText = (text: string) => {
     if (!isMemeScript(draft)) return
@@ -410,6 +439,154 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
             </div>
           ) : null
   )
+
+  if (isViralScript(draft)) {
+    const viral = draft.payload.viral
+    const text = viral.texts[0]?.text ?? ''
+    const row = 'flex flex-col gap-1.5'
+    const labelClass = 'text-[13px] font-medium text-graphite'
+    return (
+      <aside className="flex min-w-0 flex-col gap-4 rounded-xl border border-hairline bg-surface-card p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-heading-sm">Edit viral clip reel</h2>
+          <button
+            type="button"
+            aria-label="Close editor"
+            onClick={onClose}
+            className="text-graphite transition-colors hover:text-ink"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="grid gap-x-6 gap-y-4 lg:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-4">
+            <div className={row}>
+              <Label htmlFor="viral-text" className={labelClass}>
+                Text on top
+              </Label>
+              <Textarea
+                id="viral-text"
+                value={text}
+                onChange={(e) => setViralText(e.target.value)}
+                className="min-h-20 rounded-md border-hairline-soft"
+              />
+              {viral.lineOptions.length > 1 ? (
+                <div className="flex flex-col gap-1.5">
+                  {viral.lineOptions.map((line) => (
+                    <button
+                      key={line}
+                      type="button"
+                      title={line}
+                      aria-pressed={text === line}
+                      onClick={() => setViralText(line)}
+                      className={`truncate rounded-md border px-3 py-1.5 text-left text-[13px] transition-colors ${
+                        text === line
+                          ? 'border-ink bg-ink text-canvas'
+                          : 'border-hairline-strong text-ink hover:bg-muted'
+                      }`}
+                    >
+                      {line}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className={row}>
+              <span className={labelClass}>Text style</span>
+              <StoryTextToolbar
+                compact
+                script={draft}
+                role="hook"
+                onRoleChange={onSelectRole}
+                onChange={setPayload}
+                scope={scope}
+                onScopeChange={setScope}
+                frameIndex={0}
+                frameCount={1}
+              />
+            </div>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-4">
+            <div className={row}>
+              <Label htmlFor="viral-volume" className={labelClass}>
+                Sound: {Math.round(viral.clip.volume * 100)}%
+              </Label>
+              <input
+                id="viral-volume"
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={Math.round(viral.clip.volume * 100)}
+                onChange={(e) =>
+                  patchViral({
+                    clip: { volume: Number(e.target.value) / 100 },
+                  })
+                }
+                className="w-full accent-primary"
+              />
+            </div>
+
+            <div className={row}>
+              <Label htmlFor="edit-caption" className={labelClass}>
+                Caption
+              </Label>
+              <Textarea
+                id="edit-caption"
+                value={draft.payload.caption}
+                onChange={(e) =>
+                  setPayload({
+                    ...draft,
+                    payload: { ...draft.payload, caption: e.target.value },
+                  })
+                }
+                className="min-h-16 rounded-md border-hairline-soft"
+              />
+            </div>
+            <div className={row}>
+              <Label htmlFor="edit-tags" className={labelClass}>
+                Hashtags
+              </Label>
+              <Input
+                id="edit-tags"
+                value={hashtags}
+                onChange={(e) => setHashtags(e.target.value)}
+                className="h-9 rounded-md border-hairline-soft"
+              />
+            </div>
+          </div>
+        </div>
+
+        {error ? (
+          <p className="rounded-lg border border-hairline-soft bg-hairline/60 px-4 py-3 text-sm text-ink">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="flex justify-end gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            className="rounded-full"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={saving}
+            onClick={() => void handleSave()}
+            className="rounded-full"
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </Button>
+        </div>
+      </aside>
+    )
+  }
 
   if (isMemeScript(draft)) {
     const meme = draft.payload.meme

@@ -44,7 +44,7 @@ interface TypeOption {
   description: string
   beta?: boolean
   value?: IgFormat
-  reelKind?: 'meme'
+  reelKind?: 'meme' | 'viral'
 }
 
 const REEL_OPTIONS: TypeOption[] = [
@@ -53,6 +53,12 @@ const REEL_OPTIONS: TypeOption[] = [
     description: 'Green screen meme video over a background, with a meme line.',
     value: 'REEL',
     reelKind: 'meme',
+  },
+  {
+    label: 'Viral clip reel',
+    description: 'Tweet-style text on top of a viral video.',
+    value: 'REEL',
+    reelKind: 'viral',
   },
   {
     label: 'Video reel',
@@ -243,7 +249,10 @@ export function ContentPanel({
     }
   }
 
-  const handleGenerate = async (igFormat?: IgFormat, reelKind?: 'meme') => {
+  const handleGenerate = async (
+    igFormat?: IgFormat,
+    reelKind?: 'meme' | 'viral',
+  ) => {
     setPickerOpen(false)
     setGenerating(true)
     setError(null)

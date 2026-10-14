@@ -23,7 +23,8 @@ import type { Frame, FrameMedia } from '@/lib/render'
 import { cn } from '@/lib/utils'
 import type { AssetItem } from '@/services/assets'
 import { MemePreview } from '@/components/features/MemePreview'
-import { isMemeScript } from '@/types/script'
+import { ViralPreview } from '@/components/features/ViralPreview'
+import { isMemeScript, isViralScript } from '@/types/script'
 import type { PieceScript, TextRole } from '@/types/script'
 
 interface PiecePreviewProps {
@@ -86,6 +87,16 @@ export function PiecePreview(props: PiecePreviewProps) {
         editable={props.editable}
         onSelectRole={props.onSelectRole}
         onMoveRole={props.onMoveRole}
+      />
+    )
+  }
+  if (isViralScript(props.script)) {
+    return (
+      <ViralPreview
+        script={props.script}
+        className={props.className}
+        editable={props.editable}
+        onSelectRole={props.onSelectRole}
       />
     )
   }

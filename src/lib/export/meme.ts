@@ -7,13 +7,16 @@ import type { PieceScript } from '@/types/script'
 import { isMemeScript } from '@/types/script'
 import { canExportMp4 } from '@/lib/export/reel'
 import { seekVideo } from '@/lib/export/media'
+import {
+  AUDIO_CHANNELS,
+  AUDIO_RATE,
+  encodeAudio,
+  renderClipAudio,
+} from '@/lib/export/audio'
 
 const FPS = 30
 const BITRATE = 6_000_000
 const CODEC = 'avc1.640028'
-const AUDIO_RATE = 48_000
-const AUDIO_CHANNELS = 2
-const AUDIO_CODEC = 'mp4a.40.2'
 const KEY_MAX_SIDE = 1280
 
 function loadVideo(url: string): Promise<HTMLVideoElement> {
@@ -45,101 +48,6 @@ function loadImage(url: string): Promise<HTMLImageElement> {
     )
     image.src = url
   })
-}
-
-/** Decodes the clip's audio and loops it to `seconds`. Null when it has none. */
-async function loopedAudio(
-  clipUrl: string,
-  seconds: number,
-  volume: number,
-): Promise<AudioBuffer | null> {
-  if (
-    volume <= 0 ||
-    typeof AudioEncoder === 'undefined' ||
-    typeof AudioData === 'undefined'
-  ) {
-    return null
-  }
-  const support = await AudioEncoder.isConfigSupported({
-    codec: AUDIO_CODEC,
-    sampleRate: AUDIO_RATE,
-    numberOfChannels: AUDIO_CHANNELS,
-    bitrate: 128_000,
-  }).catch(() => ({ supported: false }))
-  if (!support.supported) return null
-
-  try {
-    const response = await fetch(clipUrl)
-    const data = await response.arrayBuffer()
-    const decoder = new OfflineAudioContext(
-      AUDIO_CHANNELS,
-      AUDIO_RATE,
-      AUDIO_RATE,
-    )
-    const decoded = await decoder.decodeAudioData(data)
-    if (!decoded.length) return null
-    const offline = new OfflineAudioContext(
-      AUDIO_CHANNELS,
-      Math.round(seconds * AUDIO_RATE),
-      AUDIO_RATE,
-    )
-    const source = offline.createBufferSource()
-    source.buffer = decoded
-    source.loop = true
-    const gain = offline.createGain()
-    gain.gain.value = Math.min(1, volume)
-    source.connect(gain).connect(offline.destination)
-    source.start(0)
-    return await offline.startRendering()
-  } catch {
-    return null
-  }
-}
-
-async function encodeAudio(
-  buffer: AudioBuffer,
-  onChunk: (chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) => void,
-): Promise<void> {
-  let failure: Error | null = null
-  const encoder = new AudioEncoder({
-    output: onChunk,
-    error: (error) => {
-      failure = error
-    },
-  })
-  encoder.configure({
-    codec: AUDIO_CODEC,
-    sampleRate: AUDIO_RATE,
-    numberOfChannels: AUDIO_CHANNELS,
-    bitrate: 128_000,
-  })
-  const block = 4096
-  const left = buffer.getChannelData(0)
-  const right =
-    buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : buffer.getChannelData(0)
-  for (let offset = 0; offset < buffer.length; offset += block) {
-    if (failure) throw failure
-    const frames = Math.min(block, buffer.length - offset)
-    const planar = new Float32Array(frames * 2)
-    planar.set(left.subarray(offset, offset + frames), 0)
-    planar.set(right.subarray(offset, offset + frames), frames)
-    const audio = new AudioData({
-      format: 'f32-planar',
-      sampleRate: AUDIO_RATE,
-      numberOfFrames: frames,
-      numberOfChannels: AUDIO_CHANNELS,
-      timestamp: Math.round((offset * 1_000_000) / AUDIO_RATE),
-      data: planar,
-    })
-    encoder.encode(audio)
-    audio.close()
-    while (encoder.encodeQueueSize > 16) {
-      await new Promise((resolve) => setTimeout(resolve, 5))
-    }
-  }
-  await encoder.flush()
-  encoder.close()
-  if (failure) throw failure
 }
 
 export interface MemeExportResult {
@@ -184,7 +92,7 @@ export async function exportMemeReel(
     backgroundUrl ? loadImage(backgroundUrl) : Promise.resolve(null),
   ])
   const seconds = Math.min(30, Math.max(1, meme.loopSeconds))
-  const audio = await loopedAudio(clipUrl, seconds, meme.clip.volume)
+  const audio = await renderClipAudio(clipUrl, seconds, meme.clip.volume, true)
 
   const canvas = document.createElement('canvas')
   canvas.width = width

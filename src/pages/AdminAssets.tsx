@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { GreenScreenManager } from '@/components/features/GreenScreenManager'
+import { ViralClipManager } from '@/components/features/ViralClipManager'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { isAdminUser } from '@/services/content'
 
@@ -30,9 +31,15 @@ export function AdminAssetsPage() {
             <TabsTrigger value="greenscreen" className="whitespace-nowrap">
               Green screen videos
             </TabsTrigger>
+            <TabsTrigger value="viral" className="whitespace-nowrap">
+              Viral clips
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="greenscreen" className="mt-6">
             <GreenScreenManager />
+          </TabsContent>
+          <TabsContent value="viral" className="mt-6">
+            <ViralClipManager />
           </TabsContent>
         </Tabs>
       )}

@@ -2,7 +2,12 @@ import { getUrl, remove, uploadData } from 'aws-amplify/storage'
 
 const LOGO_PREFIX = 'media/logos/'
 
-export type MediaFolder = 'logos' | 'brand' | 'screenshots' | 'greenscreen'
+export type MediaFolder =
+  | 'logos'
+  | 'brand'
+  | 'screenshots'
+  | 'greenscreen'
+  | 'viral'
 
 /**
  * Uploads an image under `media/<folder>/` (authenticated path declared in

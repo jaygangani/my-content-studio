@@ -27,6 +27,18 @@ export interface MemePayload {
   clip: { position: MemeClipPosition; scale: number; volume: number }
 }
 
+/** Viral clip reel: tweet-style text in a header above a viral video. */
+export interface ViralPayload {
+  videoId: string
+  videoKey: string
+  videoTitle?: string
+  durationSeconds: number
+  lineOptions: string[]
+  texts: Array<{ text: string; maxWidth?: number }>
+  clip: { volume: number }
+  header: { background: string }
+}
+
 export interface ReelPayload {
   hook: string
   beats: ReelBeat[]
@@ -37,6 +49,7 @@ export interface ReelPayload {
   total_seconds: number
   unified?: boolean
   meme?: MemePayload
+  viral?: ViralPayload
 }
 
 export type CarouselVisualType =
@@ -144,6 +157,13 @@ export type PieceScript =
   | (ScriptBase & { schema: 'CAROUSEL'; payload: CarouselPayload })
   | (ScriptBase & { schema: 'IMAGE'; payload: ImagePayload })
   | (ScriptBase & { schema: 'STORY'; payload: StoryPayload })
+
+/** True when the script is a viral clip reel. */
+export function isViralScript(
+  script: PieceScript | null | undefined,
+): script is ScriptBase & { schema: 'REEL'; payload: ReelPayload & { viral: ViralPayload } } {
+  return script?.schema === 'REEL' && Boolean(script.payload.viral)
+}
 
 /** True when the script is a green screen meme reel. */
 export function isMemeScript(

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { AppLogo } from '@/components/features/AppLogo'
 import { MemeConfigPanel } from '@/components/features/MemeConfigPanel'
+import { ViralConfigPanel } from '@/components/features/ViralConfigPanel'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -199,6 +200,7 @@ export function AppConfigPanel({ app, onSaved }: AppConfigPanelProps) {
       </Card>
 
       <MemeConfigPanel appId={app.id} />
+      <ViralConfigPanel appId={app.id} />
     </div>
   )
 }

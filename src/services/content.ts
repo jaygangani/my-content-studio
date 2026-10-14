@@ -181,7 +181,7 @@ async function callContentApi<T>(path: string, body: object): Promise<T> {
 export function generateContentDraft(
   appId: string,
   igFormat?: IgFormat,
-  reelKind?: 'meme',
+  reelKind?: 'meme' | 'viral',
 ): Promise<GenerationResult> {
   return callContentApi<GenerationResult>('/content/generate', {
     appId,
@@ -261,4 +261,61 @@ export async function isAdminUser(): Promise<boolean> {
   const session = await fetchAuthSession()
   const groups = session.tokens?.accessToken?.payload['cognito:groups']
   return Array.isArray(groups) && groups.includes('admin')
+}
+
+/** Result of an admin test run: raw output, nothing saved. */
+export interface TestGenerateResult {
+  ok: boolean
+  error?: string
+  skipped?: string
+  payload?: unknown
+  tokens?: number
+  cost?: number | null
+  persona?: string
+  feature?: string
+  pillar?: string
+  video?: string
+}
+
+/** Fields the AI fills in for a new format. */
+export interface FormatDraftResult {
+  format: {
+    name: string
+    groupName: string
+    igFormat: string
+    structure: string
+    visual: string
+    cta: string
+    shareTrigger: string
+    hooks: string[]
+    promptTemplate: string
+    extraRules: string
+    sharpen: string
+    requiredInputs: string[]
+    layout: string
+    variant: string
+    lineCount: number
+    slideMin: number
+    slideMax: number
+    stockPolicy: string
+  }
+  tokens: number
+}
+
+/** POST /content/draft-format: admin only, free text in, filled form out. */
+export function draftFormat(description: string): Promise<FormatDraftResult> {
+  return callContentApi<FormatDraftResult>('/content/draft-format', {
+    description,
+  })
+}
+
+/** POST /content/test-generate: admin only, runs one format against an app. */
+export function testGenerate(
+  formatId: number,
+  appId: string,
+): Promise<TestGenerateResult> {
+  return callContentApi<TestGenerateResult>('/content/test-generate', {
+    formatId,
+    appId,
+  })
 }

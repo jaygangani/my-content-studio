@@ -23,6 +23,7 @@ import {
 import type { ContentItem } from '@/services/content'
 import {
   isMemeScript,
+  isViralScript,
   parseScript,
   scriptCaption,
   scriptHashtags,
@@ -148,7 +149,7 @@ export function FeedPage() {
     <div
       className={cn(
         'mx-auto w-full px-4 py-6 sm:px-6 sm:py-10',
-        editing ? (isMemeScript(script) ? 'max-w-6xl' : 'max-w-5xl') : 'max-w-xl',
+        editing ? ((isMemeScript(script) || isViralScript(script)) ? 'max-w-6xl' : 'max-w-5xl') : 'max-w-xl',
       )}
     >
       <div className="flex flex-wrap items-end justify-between gap-4">
