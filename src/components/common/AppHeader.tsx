@@ -41,20 +41,12 @@ export function AppHeader() {
           Apps
         </Link>
         {admin ? (
-          <>
-            <Link
-              to="/admin/assets"
-              className="rounded-full px-3 py-2 text-sm font-medium text-ink-soft sm:px-4 transition-colors hover:text-ink"
-            >
-              Assets
-            </Link>
-            <Link
-              to="/admin/formats"
-              className="rounded-full px-3 py-2 text-sm font-medium text-ink-soft sm:px-4 transition-colors hover:text-ink"
-            >
-              Formats
-            </Link>
-          </>
+          <Link
+            to="/admin/content"
+            className="rounded-full px-3 py-2 text-sm font-medium text-ink-soft sm:px-4 transition-colors hover:text-ink"
+          >
+            Admin
+          </Link>
         ) : null}
         <Button onClick={() => signOut?.()} className="h-9 rounded-full px-4 sm:px-5">
           Sign out

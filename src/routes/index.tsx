@@ -26,18 +26,10 @@ const routes: RouteEntry[] = [
     ),
   },
   {
-    path: '/admin/formats',
+    path: '/admin/content',
     component: lazy(() =>
-      import('@/pages/AdminFormats').then((module) => ({
-        default: module.AdminFormatsPage,
-      })),
-    ),
-  },
-  {
-    path: '/admin/assets',
-    component: lazy(() =>
-      import('@/pages/AdminAssets').then((module) => ({
-        default: module.AdminAssetsPage,
+      import('@/pages/AdminContent').then((module) => ({
+        default: module.AdminContentPage,
       })),
     ),
   },
@@ -113,6 +105,14 @@ export function AppRoutes(): ReactElement {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<Navigate to="/apps" replace />} />
+      <Route
+        path="/admin/formats"
+        element={<Navigate to="/admin/content?tab=formats" replace />}
+      />
+      <Route
+        path="/admin/assets"
+        element={<Navigate to="/admin/content?tab=library" replace />}
+      />
       <Route element={<ProtectedShell />}>
         {routes.map((route) => (
           <Route

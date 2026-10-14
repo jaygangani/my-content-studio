@@ -93,45 +93,75 @@ export async function saveProfile(
   return result.data.id
 }
 
-/** Per-app meme reel configuration stored on the profile record. */
-export async function getMemeConfig(appId: string): Promise<unknown> {
+function parseRecord(value: unknown): Record<string, unknown> {
+  const raw = parseRaw(value ?? null)
+  return typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {}
+}
+
+/**
+ * Per-app settings for one reel subtype. Reads `reelConfig[subtype]` and falls
+ * back to the older `memeConfig` / `viralConfig` fields.
+ */
+export async function getSubtypeConfig(
+  appId: string,
+  subtype: string,
+): Promise<Record<string, unknown>> {
   const { data, errors } = await dataClient.models.AppProfile.list({
     filter: { appId: { eq: appId } },
   })
   if (errors?.length) throw new Error(errors[0].message)
-  return parseRaw(data[0]?.memeConfig ?? null)
+  const row = data[0]
+  const reel = parseRecord(row?.reelConfig)
+  const own = reel[subtype]
+  if (typeof own === 'object' && own !== null) {
+    return own as Record<string, unknown>
+  }
+  if (subtype === 'reel.green-screen') return parseRecord(row?.memeConfig)
+  if (subtype === 'reel.tweet-style') return parseRecord(row?.viralConfig)
+  return {}
 }
 
-export async function saveMemeConfig(
+export async function saveSubtypeConfig(
   appId: string,
+  subtype: string,
   config: object,
 ): Promise<void> {
   const { data, errors } = await dataClient.models.AppProfile.list({
     filter: { appId: { eq: appId } },
   })
   if (errors?.length) throw new Error(errors[0].message)
-  const memeConfig = JSON.stringify(config)
   const row = data[0]
+  const reelConfig = JSON.stringify({
+    ...parseRecord(row?.reelConfig),
+    [subtype]: config,
+  })
   const result = row
-    ? await dataClient.models.AppProfile.update({ id: row.id, memeConfig })
-    : await dataClient.models.AppProfile.create({ appId, memeConfig })
+    ? await dataClient.models.AppProfile.update({ id: row.id, reelConfig })
+    : await dataClient.models.AppProfile.create({ appId, reelConfig })
   if (result.errors?.length) throw new Error(result.errors[0].message)
 }
 
-/** Per-app viral clip reel configuration stored on the profile record. */
+export async function getMemeConfig(appId: string): Promise<unknown> {
+  return getSubtypeConfig(appId, 'reel.green-screen')
+}
+
+export async function saveMemeConfig(
+  appId: string,
+  config: object,
+): Promise<void> {
+  return saveSubtypeConfig(appId, 'reel.green-screen', config)
+}
+
+/** Per-app viral clip reel configuration. */
 export interface ViralConfig {
   blockedVideoIds: string[]
   volume: number
 }
 
 export async function getViralConfig(appId: string): Promise<ViralConfig> {
-  const { data, errors } = await dataClient.models.AppProfile.list({
-    filter: { appId: { eq: appId } },
-  })
-  if (errors?.length) throw new Error(errors[0].message)
-  const raw = parseRaw(data[0]?.viralConfig ?? null)
-  const record =
-    typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
+  const record = await getSubtypeConfig(appId, 'reel.tweet-style')
   const volume = Number(record.volume)
   return {
     blockedVideoIds: Array.isArray(record.blockedVideoIds)
@@ -145,14 +175,5 @@ export async function saveViralConfig(
   appId: string,
   config: ViralConfig,
 ): Promise<void> {
-  const { data, errors } = await dataClient.models.AppProfile.list({
-    filter: { appId: { eq: appId } },
-  })
-  if (errors?.length) throw new Error(errors[0].message)
-  const viralConfig = JSON.stringify(config)
-  const row = data[0]
-  const result = row
-    ? await dataClient.models.AppProfile.update({ id: row.id, viralConfig })
-    : await dataClient.models.AppProfile.create({ appId, viralConfig })
-  if (result.errors?.length) throw new Error(result.errors[0].message)
+  return saveSubtypeConfig(appId, 'reel.tweet-style', config)
 }

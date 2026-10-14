@@ -13,6 +13,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { draftFormat } from '@/services/content'
+import { REEL_SUBTYPES, rowSubtype } from '@/lib/reelSubtypes'
+import type { ReelSubtypeKey } from '@/lib/reelSubtypes'
+import { categoryLabel, listStockAssets } from '@/services/stock'
+import type { StockAssetRow } from '@/services/stock'
 import {
   CAROUSEL_VARIANTS,
   FORMAT_LAYOUTS,
@@ -29,7 +33,18 @@ import type { FormatDef } from '@/services/formats'
 const selectClass =
   'h-10 w-full rounded-md border border-hairline-strong bg-surface-card px-3 text-sm text-ink'
 
+interface FormatManagerProps {
+  /** Show only this content type (IMAGE, CAROUSEL, STORY, REEL). */
+  igFormat?: string
+  /** Show only this reel subtype and create new formats under it. */
+  subtype?: ReelSubtypeKey
+}
+
+/** Subtypes whose pipeline writes text for a stock clip. */
+const COMPACT_SUBTYPES: string[] = ['reel.green-screen', 'reel.tweet-style']
+
 interface Draft {
+  assetIds: string[]
   name: string
   groupName: string
   igFormat: string
@@ -55,6 +70,7 @@ function toDraft(format: FormatDef | null): Draft {
   const list = (value: Array<string | null> | null | undefined) =>
     (value ?? []).filter(Boolean).join('\n')
   return {
+    assetIds: (format?.assetIds ?? []).filter((id): id is string => !!id),
     name: format?.name ?? '',
     groupName: format?.groupName ?? '',
     igFormat: format?.igFormat ?? 'REEL',
@@ -97,7 +113,7 @@ const IG_LABEL: Record<string, string> = {
 }
 
 /** Admin screen for the format catalog. */
-export function FormatManager() {
+export function FormatManager({ igFormat, subtype }: FormatManagerProps = {}) {
   const [formats, setFormats] = useState<FormatDef[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -129,19 +145,27 @@ export function FormatManager() {
     const q = query.trim().toLowerCase()
     return formats.filter(
       (format) =>
+        (!igFormat || format.igFormat === igFormat) &&
+        (!subtype || rowSubtype(format) === subtype) &&
         (!typeFilter || format.igFormat === typeFilter) &&
         (!q ||
           format.name.toLowerCase().includes(q) ||
           (format.groupName ?? '').toLowerCase().includes(q) ||
           String(format.formatId) === q),
     )
-  }, [formats, query, typeFilter])
+  }, [formats, query, typeFilter, igFormat, subtype])
 
   const open = (format: FormatDef | null) => {
     setError(null)
     setCreating(format === null)
     setEditing(format)
-    setDraft(toDraft(format))
+    setDraft(
+      format === null && subtype
+        ? { ...toDraft(null), igFormat: 'REEL' }
+        : format === null && igFormat
+          ? { ...toDraft(null), igFormat }
+          : toDraft(format),
+    )
     setIdea('')
     setDraftNote(null)
   }
@@ -173,6 +197,7 @@ export function FormatManager() {
         slideMin: format.slideMin ? String(format.slideMin) : '',
         slideMax: format.slideMax ? String(format.slideMax) : '',
         stockPolicy: format.stockPolicy === 'never' ? '' : format.stockPolicy,
+        assetIds: [],
       })
       setDraftNote(
         `Form filled (${tokens} tokens). Review every field, then save.`,
@@ -224,6 +249,7 @@ export function FormatManager() {
         slideMin: toNumber(draft.slideMin),
         slideMax: toNumber(draft.slideMax),
         stockPolicy: draft.stockPolicy,
+        assetIds: draft.assetIds,
       }
       if (!fields.name) throw new Error('Name is required.')
       if (editing) {
@@ -234,10 +260,21 @@ export function FormatManager() {
             0,
             ...formats.filter((f) => f.formatId < 9000).map((f) => f.formatId),
           ) + 1
+        const spec = subtype ? REEL_SUBTYPES[subtype] : null
         await createFormat({
           ...fields,
+          contentType: subtype
+            ? 'reel'
+            : (IG_LABEL[draft.igFormat] ? draft.igFormat.toLowerCase() : 'reel'),
+          subtype: subtype ?? '',
+          assetCategory: spec?.assetCategory ?? '',
           formatId: nextId,
-          kind: 'standard',
+          kind:
+            subtype === 'reel.green-screen'
+              ? 'meme'
+              : subtype === 'reel.tweet-style'
+                ? 'viral'
+                : 'standard',
           isMeme: false,
           repostAs: '',
           sortOrder: nextId,
@@ -264,10 +301,24 @@ export function FormatManager() {
     }
   }
 
+  const [stockRows, setStockRows] = useState<StockAssetRow[]>([])
+  useEffect(() => {
+    void listStockAssets()
+      .then(setStockRows)
+      .catch(() => setStockRows([]))
+  }, [])
+
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }))
 
-  const special = editing ? editing.kind !== 'standard' : false
+  const activeSubtype = subtype ?? (editing ? rowSubtype(editing) : '')
+  const compact = COMPACT_SUBTYPES.includes(activeSubtype)
+  const subtypeSpec =
+    activeSubtype in REEL_SUBTYPES ? REEL_SUBTYPES[activeSubtype as ReelSubtypeKey] : null
+  const special = false
+  const pinChoices = subtypeSpec?.assetCategory
+    ? stockRows.filter((row) => row.category === subtypeSpec.assetCategory)
+    : []
   const isCarousel = draft.igFormat === 'CAROUSEL'
   const isImage = draft.igFormat === 'IMAGE'
 
@@ -302,19 +353,21 @@ export function FormatManager() {
           placeholder="Search name, group or id"
           className="h-10 w-full rounded-md border-hairline-soft sm:w-72"
         />
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-          aria-label="Filter by type"
-          className="h-10 rounded-md border border-hairline-strong bg-surface-card px-3 text-sm text-ink"
-        >
-          <option value="">All types</option>
-          {IG_FORMATS.map((type) => (
-            <option key={type} value={type}>
-              {IG_LABEL[type]}
-            </option>
-          ))}
-        </select>
+        {!igFormat && !subtype ? (
+          <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            aria-label="Filter by type"
+            className="h-10 rounded-md border border-hairline-strong bg-surface-card px-3 text-sm text-ink"
+          >
+            <option value="">All types</option>
+            {IG_FORMATS.map((type) => (
+              <option key={type} value={type}>
+                {IG_LABEL[type]}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <Button
           type="button"
           onClick={() => open(null)}
@@ -354,9 +407,12 @@ export function FormatManager() {
                   {format.name}
                 </p>
                 <p className="truncate text-[13px] text-stone">
-                  {IG_LABEL[format.igFormat ?? ''] ?? format.igFormat}
-                  {format.kind !== 'standard' ? ` · ${format.kind}` : ''}
-                  {format.groupName ? ` · ${format.groupName}` : ''}
+                  {subtype
+                    ? (format.groupName ?? '')
+                    : (REEL_SUBTYPES[rowSubtype(format) as ReelSubtypeKey]?.label ??
+                      IG_LABEL[format.igFormat ?? ''] ??
+                      format.igFormat)}
+                  {!subtype && format.groupName ? ` · ${format.groupName}` : ''}
                 </p>
               </div>
               <label className="flex cursor-pointer items-center gap-2 text-[13px] text-graphite">
@@ -376,16 +432,14 @@ export function FormatManager() {
               >
                 <Pencil className="size-4" />
               </button>
-              {format.kind === 'standard' ? (
-                <button
-                  type="button"
-                  aria-label={`Delete ${format.name}`}
-                  onClick={() => void handleDelete(format)}
-                  className="rounded-full p-2 text-graphite transition-colors hover:bg-muted hover:text-ink"
-                >
-                  <Trash2 className="size-4" />
-                </button>
-              ) : null}
+              <button
+                type="button"
+                aria-label={`Delete ${format.name}`}
+                onClick={() => void handleDelete(format)}
+                className="rounded-full p-2 text-graphite transition-colors hover:bg-muted hover:text-ink"
+              >
+                <Trash2 className="size-4" />
+              </button>
             </li>
           ))}
         </ul>
@@ -403,8 +457,8 @@ export function FormatManager() {
               {editing ? `#${editing.formatId} ${editing.name}` : 'Add format'}
             </DialogTitle>
             <DialogDescription>
-              {special
-                ? 'This format has its own pipeline. You can rename it, turn it off and edit its wording in Prompts.'
+              {compact && subtypeSpec
+                ? `Your instructions are added to the ${subtypeSpec.label} prompt. Edits apply to the next generation, no deploy needed.`
                 : 'Edits apply to the next generation, no deploy needed.'}
             </DialogDescription>
           </DialogHeader>
@@ -456,35 +510,39 @@ export function FormatManager() {
                 className="h-10 rounded-md border-hairline-soft"
               />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="fmt-group" className="text-[13px] text-graphite">
-                Group
-              </Label>
-              <Input
-                id="fmt-group"
-                value={draft.groupName}
-                onChange={(e) => set('groupName', e.target.value)}
-                className="h-10 rounded-md border-hairline-soft"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="fmt-type" className="text-[13px] text-graphite">
-                Content type
-              </Label>
-              <select
-                id="fmt-type"
-                value={draft.igFormat}
-                disabled={special}
-                onChange={(e) => set('igFormat', e.target.value)}
-                className={selectClass}
-              >
-                {IG_FORMATS.map((type) => (
-                  <option key={type} value={type}>
-                    {IG_LABEL[type]}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {!subtype ? (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="fmt-group" className="text-[13px] text-graphite">
+                  Group
+                </Label>
+                <Input
+                  id="fmt-group"
+                  value={draft.groupName}
+                  onChange={(e) => set('groupName', e.target.value)}
+                  className="h-10 rounded-md border-hairline-soft"
+                />
+              </div>
+            ) : null}
+            {!subtype && !igFormat ? (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="fmt-type" className="text-[13px] text-graphite">
+                  Content type
+                </Label>
+                <select
+                  id="fmt-type"
+                  value={draft.igFormat}
+                  disabled={Boolean(editing)}
+                  onChange={(e) => set('igFormat', e.target.value)}
+                  className={selectClass}
+                >
+                  {IG_FORMATS.map((type) => (
+                    <option key={type} value={type}>
+                      {IG_LABEL[type]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
             <label className="flex cursor-pointer items-center gap-2 pt-6 text-sm text-ink">
               <input
                 type="checkbox"
@@ -496,7 +554,61 @@ export function FormatManager() {
             </label>
           </div>
 
-          {!special ? (
+          {compact ? (
+            <>
+              {text(
+                'promptTemplate',
+                'Instructions for the AI',
+                6,
+                false,
+                'Plain instructions for this format: the angle, tone, what to avoid. Added to the default prompt.',
+              )}
+              {text('hooks', 'Line patterns (one per line)', 4, false)}
+              <div className="grid gap-4 sm:grid-cols-2">
+                {text('extraRules', 'Extra rules', 3)}
+                {text('sharpen', 'Sharpening rules', 3)}
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label className="text-[13px] text-graphite">
+                  {subtypeSpec?.assetCategory
+                    ? `${categoryLabel(subtypeSpec.assetCategory)} to use`
+                    : 'Assets'}
+                </Label>
+                <p className="text-[12px] text-stone">
+                  Leave all unticked to use the whole category. Tick some to
+                  pin this format to them.
+                </p>
+                {pinChoices.length === 0 ? (
+                  <p className="text-sm text-graphite">
+                    No assets in this category yet.
+                  </p>
+                ) : (
+                  <ul className="grid max-h-48 gap-2 overflow-y-auto sm:grid-cols-2">
+                    {pinChoices.map((asset) => (
+                      <li key={asset.id}>
+                        <label className="flex cursor-pointer items-center gap-2 rounded-md border border-hairline-soft px-3 py-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={draft.assetIds.includes(asset.id)}
+                            onChange={() =>
+                              set(
+                                'assetIds',
+                                draft.assetIds.includes(asset.id)
+                                  ? draft.assetIds.filter((id) => id !== asset.id)
+                                  : [...draft.assetIds, asset.id],
+                              )
+                            }
+                            className="accent-primary"
+                          />
+                          <span className="truncate">{asset.title}</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </>
+          ) : !special ? (
             <>
               <div className="grid gap-4 sm:grid-cols-2">
                 {text('structure', 'Structure', 3)}

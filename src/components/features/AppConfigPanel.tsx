@@ -199,8 +199,15 @@ export function AppConfigPanel({ app, onSaved }: AppConfigPanelProps) {
         </form>
       </Card>
 
-      <MemeConfigPanel appId={app.id} />
-      <ViralConfigPanel appId={app.id} />
+      <section className="mt-10">
+        <p className="eyebrow text-slate">reels</p>
+        <p className="mt-3 max-w-xl text-sm leading-relaxed text-graphite">
+          Defaults for each reel type. Each piece can still be changed in the
+          editor.
+        </p>
+        <MemeConfigPanel appId={app.id} />
+        <ViralConfigPanel appId={app.id} />
+      </section>
     </div>
   )
 }

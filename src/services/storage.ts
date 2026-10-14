@@ -8,6 +8,7 @@ export type MediaFolder =
   | 'screenshots'
   | 'greenscreen'
   | 'viral'
+  | 'stock'
 
 /**
  * Uploads an image under `media/<folder>/` (authenticated path declared in

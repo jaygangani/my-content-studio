@@ -38,35 +38,16 @@ import {
 } from '@/services/content'
 import type { ContentItem, IgFormat } from '@/services/content'
 import { parseScript } from '@/types/script'
+import { REEL_SUBTYPES, REEL_SUBTYPE_KEYS, rowSubtype } from '@/lib/reelSubtypes'
+import { listFormats } from '@/services/formats'
 
 interface TypeOption {
   label: string
   description: string
   beta?: boolean
   value?: IgFormat
-  reelKind?: 'meme' | 'viral'
+  subtype?: string
 }
-
-const REEL_OPTIONS: TypeOption[] = [
-  {
-    label: 'Meme reel',
-    description: 'Green screen meme video over a background, with a meme line.',
-    value: 'REEL',
-    reelKind: 'meme',
-  },
-  {
-    label: 'Viral clip reel',
-    description: 'Tweet-style text on top of a viral video.',
-    value: 'REEL',
-    reelKind: 'viral',
-  },
-  {
-    label: 'Video reel',
-    description: 'Stock video beats with a text line on each.',
-    value: 'REEL',
-    beta: true,
-  },
-]
 
 const OTHER_OPTIONS: TypeOption[] = [
   { label: 'Carousel', description: 'Swipeable branded slides, 4:5.', value: 'CAROUSEL' },
@@ -201,6 +182,36 @@ export function ContentPanel({
   const [used, setUsed] = useState(0)
   const [admin, setAdmin] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [reelOptions, setReelOptions] = useState<TypeOption[]>([])
+
+  useEffect(() => {
+    if (!pickerOpen) return
+    let cancelled = false
+    void listFormats()
+      .then((rows) => {
+        if (cancelled) return
+        const active = new Set(
+          rows
+            .filter((row) => row.igFormat === 'REEL' && row.enabled)
+            .map((row) => rowSubtype(row)),
+        )
+        setReelOptions(
+          REEL_SUBTYPE_KEYS.filter((key) => active.has(key)).map((key) => ({
+            label: REEL_SUBTYPES[key].label,
+            description: REEL_SUBTYPES[key].description,
+            beta: REEL_SUBTYPES[key].beta,
+            value: 'REEL' as IgFormat,
+            subtype: key,
+          })),
+        )
+      })
+      .catch(() => {
+        if (!cancelled) setReelOptions([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [pickerOpen])
   const [missing, setMissing] = useState<string[]>([])
   const [brandMissing, setBrandMissing] = useState<string[]>([])
 
@@ -249,15 +260,12 @@ export function ContentPanel({
     }
   }
 
-  const handleGenerate = async (
-    igFormat?: IgFormat,
-    reelKind?: 'meme' | 'viral',
-  ) => {
+  const handleGenerate = async (igFormat?: IgFormat, subtype?: string) => {
     setPickerOpen(false)
     setGenerating(true)
     setError(null)
     try {
-      const result = await generateContentDraft(appId, igFormat, reelKind)
+      const result = await generateContentDraft(appId, igFormat, subtype)
       setUsed(result.used)
       await load()
     } catch (err) {
@@ -369,11 +377,17 @@ export function ContentPanel({
             </DialogDescription>
           </DialogHeader>
           {[
-            { title: 'Reels', options: REEL_OPTIONS },
+            { title: 'Reels', options: reelOptions },
             { title: 'Other', options: OTHER_OPTIONS },
           ].map((group) => (
             <div key={group.title} className="flex flex-col gap-2">
               <span className="eyebrow text-slate">{group.title}</span>
+              {group.options.length === 0 ? (
+                <p className="text-[13px] text-graphite">
+                  No reel formats are turned on. An admin can enable them in
+                  Admin, Content setup.
+                </p>
+              ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
                 {group.options.map((option) => {
                   const brandBlocked =
@@ -386,7 +400,7 @@ export function ContentPanel({
                       type="button"
                       disabled={blocked}
                       onClick={() =>
-                        void handleGenerate(option.value, option.reelKind)
+                        void handleGenerate(option.value, option.subtype)
                       }
                       className="flex flex-col items-start gap-1 rounded-xl border border-hairline-strong p-4 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                     >

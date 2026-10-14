@@ -4,8 +4,8 @@ import { Card } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { getViralConfig, saveViralConfig } from '@/services/profile'
 import type { ViralConfig } from '@/services/profile'
-import { listViralVideos } from '@/services/viral'
-import type { ViralVideo } from '@/services/viral'
+import { listCategoryAssets } from '@/services/stock'
+import type { CategoryAsset } from '@/services/stock'
 
 interface ViralConfigPanelProps {
   appId: string
@@ -14,14 +14,14 @@ interface ViralConfigPanelProps {
 /** Configurations tab section for viral clip reel defaults. */
 export function ViralConfigPanel({ appId }: ViralConfigPanelProps) {
   const [config, setConfig] = useState<ViralConfig | null>(null)
-  const [videos, setVideos] = useState<ViralVideo[]>([])
+  const [videos, setVideos] = useState<CategoryAsset[]>([])
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    void Promise.all([getViralConfig(appId), listViralVideos()])
+    void Promise.all([getViralConfig(appId), listCategoryAssets('viral-clip')])
       .then(([stored, list]) => {
         if (cancelled) return
         setConfig(stored)

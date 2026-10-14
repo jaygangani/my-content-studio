@@ -4,8 +4,8 @@ import { Card } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { MEME_LOOP_MAX, MEME_LOOP_MIN, normalizeMemeConfig } from '@/lib/meme'
 import type { MemeConfig } from '@/lib/meme'
-import { listGreenScreenVideos } from '@/services/greenscreen'
-import type { GreenScreenVideo } from '@/services/greenscreen'
+import { listCategoryAssets } from '@/services/stock'
+import type { CategoryAsset } from '@/services/stock'
 import { getMemeConfig, saveMemeConfig } from '@/services/profile'
 
 interface MemeConfigPanelProps {
@@ -21,14 +21,14 @@ const BACKGROUNDS = [
 /** Configurations tab section for meme reel defaults. */
 export function MemeConfigPanel({ appId }: MemeConfigPanelProps) {
   const [config, setConfig] = useState<MemeConfig | null>(null)
-  const [videos, setVideos] = useState<GreenScreenVideo[]>([])
+  const [videos, setVideos] = useState<CategoryAsset[]>([])
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    void Promise.all([getMemeConfig(appId), listGreenScreenVideos()])
+    void Promise.all([getMemeConfig(appId), listCategoryAssets('green-screen')])
       .then(([stored, list]) => {
         if (cancelled) return
         setConfig(normalizeMemeConfig(stored))
@@ -80,7 +80,7 @@ export function MemeConfigPanel({ appId }: MemeConfigPanelProps) {
   }
 
   return (
-    <Card className="mt-10 rounded-xl border-hairline bg-surface-card p-0 shadow-none">
+    <Card className="mt-6 rounded-xl border-hairline bg-surface-card p-0 shadow-none">
       <div className="flex flex-col gap-6 px-4 py-6 sm:px-8 sm:py-8">
         <div>
           <h3 className="text-sm font-medium text-ink">Meme reels</h3>
