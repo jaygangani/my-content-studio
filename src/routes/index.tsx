@@ -26,6 +26,14 @@ const routes: RouteEntry[] = [
     ),
   },
   {
+    path: '/admin/formats',
+    component: lazy(() =>
+      import('@/pages/AdminFormats').then((module) => ({
+        default: module.AdminFormatsPage,
+      })),
+    ),
+  },
+  {
     path: '/admin/assets',
     component: lazy(() =>
       import('@/pages/AdminAssets').then((module) => ({
