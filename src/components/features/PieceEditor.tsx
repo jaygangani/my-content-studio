@@ -18,6 +18,7 @@ import {
   isViralScript,
 } from '@/types/script'
 import { MEME_LOOP_MAX, MEME_LOOP_MIN } from '@/lib/meme'
+import { scriptSubtype } from '@/lib/reelSubtypes'
 import type { MemePayload, ViralPayload } from '@/types/script'
 import type { BrandAssets } from '@/lib/carousel'
 import { CAROUSEL_ICONS } from '@/lib/carousel'
@@ -440,7 +441,8 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
           ) : null
   )
 
-  if (isViralScript(draft)) {
+  const subtype = scriptSubtype(draft)
+  if (subtype === 'reel.tweet-style' && isViralScript(draft)) {
     const viral = draft.payload.viral
     const text = viral.texts[0]?.text ?? ''
     const row = 'flex flex-col gap-1.5'
@@ -588,7 +590,7 @@ export const PieceEditor = forwardRef<PieceEditorHandle, PieceEditorProps>(
     )
   }
 
-  if (isMemeScript(draft)) {
+  if (subtype === 'reel.green-screen' && isMemeScript(draft)) {
     const meme = draft.payload.meme
     const text = meme.texts[0]?.text ?? ''
     const row = 'flex flex-col gap-1.5'

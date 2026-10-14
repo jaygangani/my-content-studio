@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils'
 import type { AssetItem } from '@/services/assets'
 import { MemePreview } from '@/components/features/MemePreview'
 import { ViralPreview } from '@/components/features/ViralPreview'
+import { scriptSubtype } from '@/lib/reelSubtypes'
 import { isMemeScript, isViralScript } from '@/types/script'
 import type { PieceScript, TextRole } from '@/types/script'
 
@@ -78,7 +79,8 @@ function formatTime(seconds: number): string {
  * arrows. Draws via the same `drawFrame` as the exporters.
  */
 export function PiecePreview(props: PiecePreviewProps) {
-  if (isMemeScript(props.script)) {
+  const subtype = scriptSubtype(props.script)
+  if (subtype === 'reel.green-screen' && isMemeScript(props.script)) {
     return (
       <MemePreview
         script={props.script}
@@ -90,7 +92,7 @@ export function PiecePreview(props: PiecePreviewProps) {
       />
     )
   }
-  if (isViralScript(props.script)) {
+  if (subtype === 'reel.tweet-style' && isViralScript(props.script)) {
     return (
       <ViralPreview
         script={props.script}

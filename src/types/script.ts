@@ -119,6 +119,8 @@ export interface TextOverride {
 interface ScriptBase {
   formatId: number
   formatName: string
+  /** Reel subtype key such as `reel.green-screen`. Absent on older pieces. */
+  subtype?: string
   textStyle?: string
   layout?: 'card' | 'grid' | 'columns' | 'stack'
   variant?:
