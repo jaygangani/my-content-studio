@@ -46,8 +46,68 @@ const schema = a.schema({
       storeUrl: a.string(),
       ctaText: a.string(),
       memeConfig: a.json(),
+      viralConfig: a.json(),
     })
     .authorization((allow) => [allow.ownerDefinedIn('owner')]),
+
+  FormatDef: a
+    .model({
+      formatId: a.integer().required(),
+      name: a.string().required(),
+      groupName: a.string(),
+      igFormat: IgFormat,
+      igFormatLabel: a.string(),
+      repostAs: a.string(),
+      kind: a.string().required(),
+      isMeme: a.boolean(),
+      enabled: a.boolean().required(),
+      structure: a.string(),
+      visual: a.string(),
+      cta: a.string(),
+      shareTrigger: a.string(),
+      promptTemplate: a.string(),
+      extraRules: a.string(),
+      sharpen: a.string(),
+      hooks: a.string().array(),
+      requiredInputs: a.string().array(),
+      layout: a.string(),
+      variant: a.string(),
+      lineCount: a.integer(),
+      slideMin: a.integer(),
+      slideMax: a.integer(),
+      stockPolicy: a.string(),
+      sortOrder: a.integer(),
+    })
+    .authorization((allow) => [
+      allow.authenticated().to(['read']),
+      allow.groups(['admin']),
+    ]),
+
+  PromptSnippet: a
+    .model({
+      key: a.string().required(),
+      label: a.string(),
+      description: a.string(),
+      value: a.string().required(),
+      enabled: a.boolean().required(),
+      required: a.boolean(),
+    })
+    .authorization((allow) => [
+      allow.authenticated().to(['read']),
+      allow.groups(['admin']),
+    ]),
+
+  ViralVideo: a
+    .model({
+      title: a.string().required(),
+      keywords: a.string().array(),
+      videoKey: a.string().required(),
+      durationSeconds: a.float(),
+    })
+    .authorization((allow) => [
+      allow.authenticated().to(['read']),
+      allow.groups(['admin']),
+    ]),
 
   GreenScreenVideo: a
     .model({

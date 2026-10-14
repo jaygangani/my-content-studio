@@ -67,7 +67,15 @@ export interface MemeLinesPayload {
   bg_query: string;
 }
 
+export interface ViralLinesPayload {
+  skip: string;
+  lines: string[];
+  caption: string;
+  hashtags: string[];
+}
+
 export type GeneratedPayload =
+  | ViralLinesPayload
   | ReelPayload
   | CarouselPayload
   | ImagePayload
@@ -156,3 +164,52 @@ export const MEME_SCHEMA: JsonSchema = obj({
   hashtags: strArray,
   bg_query: str,
 });
+
+export const VIRAL_SCHEMA: JsonSchema = obj({
+  skip: str,
+  lines: strArray,
+  caption: str,
+  hashtags: strArray,
+});
+
+export const FORMAT_DRAFT_SCHEMA: JsonSchema = obj({
+  name: str,
+  groupName: str,
+  igFormat: str,
+  structure: str,
+  visual: str,
+  cta: str,
+  shareTrigger: str,
+  hooks: strArray,
+  promptTemplate: str,
+  extraRules: str,
+  sharpen: str,
+  requiredInputs: strArray,
+  layout: str,
+  variant: str,
+  lineCount: { type: 'number' },
+  slideMin: { type: 'number' },
+  slideMax: { type: 'number' },
+  stockPolicy: str,
+});
+
+export interface FormatDraft {
+  name: string;
+  groupName: string;
+  igFormat: string;
+  structure: string;
+  visual: string;
+  cta: string;
+  shareTrigger: string;
+  hooks: string[];
+  promptTemplate: string;
+  extraRules: string;
+  sharpen: string;
+  requiredInputs: string[];
+  layout: string;
+  variant: string;
+  lineCount: number;
+  slideMin: number;
+  slideMax: number;
+  stockPolicy: string;
+}

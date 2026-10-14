@@ -3,11 +3,8 @@ import { Amplify } from 'aws-amplify';
 import { generateClient } from 'aws-amplify/data';
 import { getAmplifyDataClientConfig } from '@aws-amplify/backend/function/runtime';
 import {
-  FORMATS,
   PILLARS,
-  SYSTEM_PROMPT,
   TEXT_STYLE_KEYS,
-  getFormat,
   inputsSatisfied,
   pickAvoiding,
   readBrandKit,
@@ -21,13 +18,23 @@ import type {
   Pillar,
   ProfileJson,
 } from './catalog';
+import { HttpError } from './errors';
 import { callOpenAi, estimateCost, loadOpenAiKey } from './openai';
-import { MEME_SCHEMA, SCHEMAS } from './schemas';
+import { clearStoreCache, loadFormats, loadPrompts } from './store';
+import type { Prompts } from './store';
+import {
+  FORMAT_DRAFT_SCHEMA,
+  MEME_SCHEMA,
+  SCHEMAS,
+  VIRAL_SCHEMA,
+} from './schemas';
+import type { FormatDraft } from './schemas';
 import type {
   CarouselPayload,
   GeneratedPayload,
   ImagePayload,
   MemeLinesPayload,
+  ViralLinesPayload,
   ReelPayload,
 } from './schemas';
 import { findAsset, searchImages, searchVideos } from './stock';
@@ -63,15 +70,6 @@ type ApiResult = {
   headers?: Record<string, string>;
   body: string;
 };
-
-class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
 
 function log(step: string, data: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ scope: 'generate-content', step, ...data }));
@@ -148,12 +146,39 @@ interface MemeContext {
   backgroundColor: string;
 }
 
+interface ViralVideo {
+  id: string;
+  title: string;
+  keywords: string[];
+  videoKey: string;
+  durationSeconds: number;
+}
+
+interface ViralConfig {
+  blockedVideoIds: string[];
+  volume: number;
+}
+
+const VIRAL_MAX_SECONDS = 30;
+
+function readViralConfig(value: unknown): ViralConfig {
+  const raw = parseJsonField<Record<string, unknown>>(value, {});
+  const volume = Number(raw.volume);
+  return {
+    blockedVideoIds: Array.isArray(raw.blockedVideoIds)
+      ? raw.blockedVideoIds.filter((id): id is string => typeof id === 'string')
+      : [],
+    volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 1,
+  };
+}
+
 interface Selection {
   format: FormatEntry;
   personaId: string;
   featureId: string;
   pillar: Pillar;
   video?: MemeVideo;
+  viralVideo?: ViralVideo;
 }
 
 interface Attempt {
@@ -163,24 +188,22 @@ interface Attempt {
   completionTokens: number;
 }
 
-const ADDENDUM = [
-  'Output notes for this run:',
-  '- Always fill every field of the JSON schema. Use an empty string for "skip" when the piece is produced.',
-  '- If a required fact is missing from the App Profile, set "skip" to a short reason and leave the rest empty.',
-  '- Reel beats: 5-10 words each, total of all beat seconds between 15 and 30.',
-  '- Reel: the text of beat 1 IS the hook (use the same wording as "hook") and the text of the LAST beat IS the call to action (same wording as "cta"). There is no separate title or CTA on screen.',
-  '- Hook: at most 8 words. Slide headlines: at most 8 words. Slide bodies: at most 25 words.',
-  '- Every number, stat, review, comment, offer or milestone must come from the App Profile.',
-  '',
-  'Sharpness rules (apply to every piece):',
-  '- Specificity test: if a line could be pasted into a post for a different app unchanged, rewrite it.',
-  '- Name the exact moment: what the persona typed, tapped, searched, said or saw, with a time, number or object.',
-  '- Use the persona\'s own words and daily moments from the profile. Prefer a concrete noun over an abstract one (a tab, a notebook, a 1am search, not "productivity").',
-  '- Banned filler: "journey", "game changer", "level up", "unlock", "hack", "in today\'s world", "it takes time", labels like Organized or Chaotic.',
-  '- The first line must create tension or an open question the viewer needs resolved.',
-  '- Write for a total beginner who knows nothing yet: no jargon without a plain-word translation, and show the confusion they actually feel.',
-  '- Funny beats true: the most relatable detail goes last, and the app appears only in the CTA or as the one fix.',
-].join('\n');
+let FORMATS: FormatEntry[] = [];
+let PROMPTS: Prompts | null = null;
+
+function prompts(): Prompts {
+  if (!PROMPTS) throw new HttpError(503, 'Prompts are not loaded.');
+  return PROMPTS;
+}
+
+function getFormat(id: number): FormatEntry | undefined {
+  return FORMATS.find((format) => format.id === id);
+}
+
+async function prepare(client: DataClient): Promise<void> {
+  FORMATS = await loadFormats(client);
+  PROMPTS = await loadPrompts(client);
+}
 
 function describeError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -204,97 +227,42 @@ function describeError(error: unknown): string {
   return 'Unknown error.';
 }
 
-const STYLE_RULES: Record<string, string> = {
-  'bold-minimal':
-    'Bold and minimal: dark slides, one accent colour per slide, heavy headlines, no more than 2 fonts.',
-  'warm-editorial':
-    'Warm and editorial: light slides, serif headline, accent only as a thin rule or number.',
-  'tech-clean':
-    'Tech and clean: near-black slides, small uppercase labels, left aligned, no decoration.',
-};
-
-const LAYOUT_RULES: Record<string, string> = {
-  steps:
-    'Layout "steps": each value slide is one numbered step. Headline = the action (verb first). Body = the detail or why. The step number is drawn for you.',
-  checklist:
-    'Layout "checklist": each value slide is one checkable item. Headline = the item. Body = one line of how or why. A checkbox is drawn for you.',
-  split:
-    'Layout "split": each value slide compares two sides. Headline = the claim or topic. Body = "left text || right text" (use || exactly once). stat_label = "Left label || Right label" such as "Myth || Fact" or "Before || After".',
-  stat:
-    'Layout "stat": each value slide is one big number. visual_type "data". stat_value = the number (from the App Profile), stat_label = what it means in one line, headline = the takeaway.',
-  quote:
-    'Layout "quote": each value slide is one bold statement. Headline = the statement (max 7 words). Body = a short attribution or follow-up line.',
-  tier:
-    'Layout "tier": each value slide is one tier. Headline = "S: Always do" style (tier letter, colon, label). Body = 2 to 4 short items separated by ||.',
-  cards:
-    'Layout "cards": each value slide is one numbered card. Headline = the card title. Body = 2 short lines of explanation.',
-  chat:
-    'Layout "chat": each value slide is a question and answer. Headline = the question as someone would ask it. Body = the answer in plain words.',
-  level:
-    'Layout "level": each value slide is the next level, easiest first. Headline = the level name (a behaviour, not "Beginner"). Body = what it looks like.',
-  timeline:
-    'Layout "timeline": each value slide is one moment in order. stat_label = the time label ("Week 1", "Day 3", "Q2"). Headline = what happened. Body = one line of detail.',
-  grid:
-    'Layout "grid": each value slide is a mini cheat sheet. Headline = the topic. Body = 3 or 4 short items separated by ||.',
-  flags:
-    'Layout "flags": each value slide is one flag. Set icon to "check" for a green flag or "x" for a red flag. Headline = the behaviour. Body = why it matters.',
-  editorial:
-    'Layout "editorial": each value slide is one chapter of a story. Headline = a strong sentence (max 7 words). Body = two short lines of narrative.',
-  template:
-    'Layout "template": each value slide shows something to copy. Headline = what it is for. Body = the copy-paste text with the parts to change in [square brackets].',
-  poster:
-    'Layout "poster": each value slide is one punchy line shown huge. Headline = the line (max 6 words). Body = one short supporting line.',
-};
-
 function carouselRules(
   kit: BrandKit,
   screenshots: Array<{ id: string; name: string }>,
   stockPolicy: 'never' | 'allowed' | 'preferred',
   variant?: string,
 ): string {
-  const screenshotLine = screenshots.length
-    ? `"screenshot" (set visual to one of these feature ids: ${screenshots
-        .map((s) => `${s.id} = ${s.name}`)
-        .join('; ')})`
-    : '"screenshot" is NOT available, never use it';
-  return [
-    'Carousel rules (branded template, 1080x1350, brand kit is applied automatically):',
-    '- 5 to 8 slides. Slide 1 role "hook", the last slide role "cta", every slide between role "value".',
-    '- Slide 1: headline of max 7 words that works on its own as a hook; body at most one short line.',
-    '- Each value slide teaches exactly ONE idea: headline max 7 words, body max 2 short lines (under 22 words).',
-    '- A call to action (save, follow, comment a keyword, link in bio) appears ONLY on the last slide, once.',
-    `- visual_type per slide: "typography" (default, use for most slides), "icon" (set icon to one of check,x,arrow,bolt,star,clock,heart,target,bulb,chat), "data" (set stat_value and stat_label, use only numbers from the App Profile), ${screenshotLine}${
-      stockPolicy === 'preferred'
-        ? ', "stock" (PREFERRED for slide 1: set visual_type "stock" on slide 1 and visual to a concrete real-world scene query such as "person writing notes at a desk at night"; only slide 1, never abstract ideas)'
-        : stockPolicy === 'allowed'
-          ? ', "stock" (optional, only on slide 1, set visual to a concrete photo query; use it when a real scene helps the hook)'
-          : '. "stock" is NOT allowed for this format, never use it'
-    }.`,
-    '- Never place text over a photo. Leave unused visual, icon, stat_value and stat_label as empty strings.',
-    `- Visual style: ${STYLE_RULES[kit.visualStyle] ?? STYLE_RULES['bold-minimal']}`,
-    variant && LAYOUT_RULES[variant] ? `- ${LAYOUT_RULES[variant]}` : '',
-    variant && variant !== 'stat'
-      ? '- Use visual_type "typography" for every value slide in this layout unless told otherwise.'
-      : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
+  const p = prompts();
+  const screenshotRule = screenshots.length
+    ? p.fill(p.get('carousel.screenshot.available'), {
+        ids: screenshots.map((s) => `${s.id} = ${s.name}`).join('; '),
+      })
+    : p.get('carousel.screenshot.unavailable');
+  const styleRule =
+    p.optional(`style.${kit.visualStyle}`) || p.optional('style.bold-minimal');
+  const layoutRule = variant ? p.optional(`layout.${variant}`) : '';
+  return p.fill(p.get('carousel.base'), {
+    screenshot_rule: screenshotRule,
+    stock_rule: p.get(`carousel.stock.${stockPolicy}`),
+    style_rule: styleRule,
+    layout_rule_line: layoutRule ? `- ${layoutRule}` : '',
+    layout_note:
+      variant && variant !== 'stat' ? p.optional('carousel.layout_note') : '',
+  });
 }
 
 function imageRules(
   kit: BrandKit,
   stockPolicy: 'never' | 'allowed' | 'preferred',
 ): string {
-  return [
-    'Image post rules (branded template, 1080x1350, brand kit is applied automatically):',
-    '- The text lines are painted by the template, so write only the lines. No emojis, no hashtags inside the lines.',
-    `- Visual style: ${STYLE_RULES[kit.visualStyle] ?? STYLE_RULES['bold-minimal']}`,
-    stockPolicy === 'preferred'
-      ? '- "visual": a concrete real-world scene query for a photo, such as "person writing notes at a desk at night". Never abstract ideas.'
-      : stockPolicy === 'allowed'
-        ? '- "visual": optional. Set a concrete photo scene query only when a real scene makes the joke land; otherwise return an empty string.'
-        : '- "visual": return an empty string. No photo is used for this format.',
-  ].join('\n');
+  const p = prompts();
+  const styleRule =
+    p.optional(`style.${kit.visualStyle}`) || p.optional('style.bold-minimal');
+  return p.fill(p.get('image.base'), {
+    style_rule: styleRule,
+    stock_rule: p.get(`image.stock.${stockPolicy}`),
+  });
 }
 
 function jsonResponse(statusCode: number, payload: unknown): ApiResult {
@@ -459,27 +427,121 @@ async function recentPicks(client: DataClient, appId: string) {
     videos: latest
       .map((c) => {
         const script = parseJsonField<{
-          payload?: { meme?: { videoId?: string } };
+          payload?: {
+            meme?: { videoId?: string };
+            viral?: { videoId?: string };
+          };
         }>(c.scriptJson, {});
-        return script.payload?.meme?.videoId;
+        return (
+          script.payload?.meme?.videoId ?? script.payload?.viral?.videoId
+        );
       })
       .filter((v): v is string => typeof v === 'string'),
   };
 }
 
-const MEME_SYSTEM_PROMPT = [
-  'You write the on-screen text for an Instagram meme reel for a consumer app.',
-  'A green screen meme video plays behind the text. You only write the words.',
-  'Write 3 different meme lines, each at most 12 words, that fit the clip title and keywords and the persona\'s real moment.',
-  'Rules:',
-  '- Use only facts that appear in the input. Never invent numbers, stats, reviews or offers.',
-  '- Relatable and specific beats generic. The app is named only if it is the natural punchline.',
-  '- Follow the voice. Never use banned words or forbidden claims.',
-  '- caption: at most 25 words. hashtags: 4 to 6, each starting with #.',
-  '- bg_query: a concrete 2 to 4 word photo scene for the background, or an empty string if not needed.',
-  '- If a required fact is missing, set "skip" to a short reason and leave the rest empty. Otherwise "skip" is an empty string.',
-  'Return valid JSON only.',
-].join('\n');
+async function generateViralAttempt(
+  apiKey: string,
+  model: string,
+  appName: string,
+  description: string,
+  profile: ProfileJson,
+  profileJson: string,
+  selection: Selection,
+  bannedWords: string[],
+): Promise<
+  | { kind: 'skip'; reason: string; tokens: number; completion: number }
+  | { kind: 'ok'; attempt: Attempt }
+> {
+  const persona = profile.personas.find((p) => p.id === selection.personaId);
+  const feature = profile.features.find((f) => f.id === selection.featureId);
+  const video = selection.viralVideo;
+  if (!video) throw new HttpError(422, 'No viral video selected.');
+  const userPrompt = JSON.stringify({
+    app: appName,
+    about: description,
+    persona: persona && {
+      name: persona.name,
+      pain: persona.pain,
+      desiredResult: persona.desiredResult,
+      words: persona.words,
+      dailyMoments: persona.dailyMoments,
+    },
+    feature: feature && { name: feature.name, benefit: feature.benefit },
+    pillar: pillarLabel(selection.pillar),
+    voice: profile.voice,
+    cta: profile.ctaText,
+    clip: { title: video.title, keywords: video.keywords },
+  });
+
+  let tokens = 0;
+  let completion = 0;
+  let problems: string[] = [];
+
+  for (let round = 0; round < 2; round += 1) {
+    const prompt = problems.length
+      ? `${userPrompt}\n\nFix these problems:\n- ${problems.join('\n- ')}`
+      : userPrompt;
+    log('openai.request', {
+      formatId: selection.format.id,
+      round,
+      model,
+      promptChars: prompt.length,
+    });
+    const result = await callOpenAi(
+      apiKey,
+      model,
+      prompts().get('viral.system'),
+      prompt,
+      VIRAL_SCHEMA,
+    );
+    tokens += result.promptTokens;
+    completion += result.completionTokens;
+    const payload = result.payload as ViralLinesPayload;
+
+    const skip = payload.skip?.trim();
+    if (skip) return { kind: 'skip', reason: skip, tokens, completion };
+
+    const lines = (payload.lines ?? []).map((l) => l.trim()).filter(Boolean);
+    problems = [];
+    if (lines.length < 3) problems.push('need 3 non-empty lines');
+    lines.forEach((line, i) => {
+      if (words(line) > 22) problems.push(`line ${i + 1} is over 18 words`);
+    });
+    if (!payload.caption?.trim()) problems.push('caption is empty');
+    if (!payload.hashtags?.length) problems.push('hashtags are empty');
+    const texts = [...lines, payload.caption ?? '', ...(payload.hashtags ?? [])];
+    problems.push(
+      ...findBannedWords(texts, bannedWords),
+      ...findInventedNumbers(
+        texts.filter((t) => !t.startsWith('#')),
+        profileJson,
+      ),
+    );
+    log('validation', {
+      formatId: selection.format.id,
+      round,
+      ok: problems.length === 0,
+      problems: problems.slice(0, 6),
+    });
+    if (!problems.length) {
+      return {
+        kind: 'ok',
+        attempt: {
+          selection,
+          payload: { ...payload, lines },
+          promptTokens: tokens,
+          completionTokens: completion,
+        },
+      };
+    }
+  }
+
+  throw new HttpError(
+    422,
+    `Draft failed validation after a retry: ${problems.slice(0, 3).join('; ')}`,
+  );
+}
 
 function words(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -538,7 +600,7 @@ async function generateMemeAttempt(
     const result = await callOpenAi(
       apiKey,
       model,
-      MEME_SYSTEM_PROMPT,
+      prompts().get('meme.system'),
       prompt,
       MEME_SCHEMA,
     );
@@ -614,7 +676,11 @@ async function generateAttempt(
     feature,
     appName,
   );
-  const systemPrompt = [SYSTEM_PROMPT, ADDENDUM, extraRules]
+  const systemPrompt = [
+    prompts().get('system'),
+    prompts().get('addendum'),
+    extraRules,
+  ]
     .filter(Boolean)
     .join('\n\n');
   const schema = SCHEMAS[selection.format.igFormat];
@@ -691,6 +757,8 @@ async function fetchAssets(
   meme?: MemeContext,
 ): Promise<Array<StockAsset & { beatIndex: number }>> {
   const out: Array<StockAsset & { beatIndex: number }> = [];
+
+  if (format.viral) return out;
 
   if (format.meme) {
     const query = (payload as MemeLinesPayload).bg_query?.trim();
@@ -830,12 +898,69 @@ function toMemeFields(
   };
 }
 
+function toViralFields(
+  format: FormatEntry,
+  payload: ViralLinesPayload,
+  video: ViralVideo,
+  config: ViralConfig,
+): PieceFields {
+  const first = payload.lines[0] ?? '';
+  const seconds = Math.min(
+    VIRAL_MAX_SECONDS,
+    Math.max(1, Math.round(video.durationSeconds || 15)),
+  );
+  const script = JSON.stringify({
+    schema: 'REEL',
+    formatId: format.id,
+    formatName: format.name,
+    textStyle: 'clean',
+    payload: {
+      hook: first,
+      beats: [{ text: first, seconds, visual_query: '' }],
+      cta: '',
+      caption: payload.caption,
+      hashtags: payload.hashtags,
+      audio_mood: '',
+      total_seconds: seconds,
+      unified: true,
+      viral: {
+        videoId: video.id,
+        videoKey: video.videoKey,
+        videoTitle: video.title,
+        durationSeconds: seconds,
+        lineOptions: payload.lines,
+        texts: [{ text: first }],
+        clip: { volume: config.volume },
+        header: { background: '#000000' },
+      },
+    },
+  });
+  return {
+    title: first,
+    caption: payload.caption,
+    hashtags: payload.hashtags,
+    scriptJson: script,
+    overlayText: null,
+    videoKeywords: video.keywords,
+    videoConfigurations: null,
+  };
+}
+
 function toPieceFields(
   format: FormatEntry,
   payload: GeneratedPayload,
   meme?: MemeContext,
   hasBackgroundPhoto = false,
+  viral?: { video: ViralVideo; config: ViralConfig },
 ): PieceFields {
+  if (format.viral && viral) {
+    return toViralFields(
+      format,
+      payload as ViralLinesPayload,
+      viral.video,
+      viral.config,
+    );
+  }
   if (format.meme && meme) {
     return toMemeFields(
       format,
@@ -1022,7 +1147,7 @@ interface RunInput {
   replacePieceId?: string;
   unlimited: boolean;
   igFormat?: IgFormat;
-  reelKind?: 'meme';
+  reelKind?: 'meme' | 'viral';
 }
 
 async function listMemeVideos(client: DataClient): Promise<MemeVideo[]> {
@@ -1038,6 +1163,20 @@ async function listMemeVideos(client: DataClient): Promise<MemeVideo[]> {
       keywords: (v.keywords ?? []).filter((k): k is string => !!k),
       videoKey: v.videoKey,
       keyColor: v.keyColor,
+    }));
+}
+
+async function listViralVideos(client: DataClient): Promise<ViralVideo[]> {
+  const { data, errors } = await client.models.ViralVideo.list({ limit: 1000 });
+  logGqlErrors('ViralVideo.list', errors);
+  return data
+    .filter((v) => v.videoKey)
+    .map((v) => ({
+      id: v.id,
+      title: v.title,
+      keywords: (v.keywords ?? []).filter((k): k is string => !!k),
+      videoKey: v.videoKey,
+      durationSeconds: v.durationSeconds ?? 0,
     }));
 }
 
@@ -1178,6 +1317,23 @@ async function runGeneration(input: RunInput) {
     );
   }
 
+  const viralConfig = readViralConfig(profileRows.data[0]?.viralConfig);
+  const wantViral =
+    input.reelKind === 'viral' ||
+    Boolean(input.forced?.format.viral) ||
+    !input.igFormat;
+  const viralVideos = wantViral
+    ? (await listViralVideos(client)).filter(
+        (v) => !viralConfig.blockedVideoIds.includes(v.id),
+      )
+    : [];
+  if (input.reelKind === 'viral' && !viralVideos.length) {
+    throw new HttpError(
+      422,
+      'No viral videos are available. Ask an admin to add some.',
+    );
+  }
+
   let attempt: Attempt | null = null;
   const tried = new Set<number>();
 
@@ -1186,11 +1342,15 @@ async function runGeneration(input: RunInput) {
     if (!selection || draw > 0) {
       const eligible = FORMATS.filter(
         (f) =>
+          f.enabled !== false &&
           !tried.has(f.id) &&
           (!input.igFormat || f.igFormat === input.igFormat) &&
           (input.forced?.format.meme || input.reelKind === 'meme'
             ? Boolean(f.meme)
-            : !f.meme || (!input.igFormat && memeVideos.length > 0)) &&
+            : input.forced?.format.viral || input.reelKind === 'viral'
+              ? Boolean(f.viral)
+              : (!f.meme || (!input.igFormat && memeVideos.length > 0)) &&
+                (!f.viral || (!input.igFormat && viralVideos.length > 0))) &&
           inputsSatisfied(f, profile) &&
           ((f.igFormat !== 'CAROUSEL' && f.igFormat !== 'IMAGE') ||
             brandKit !== null),
@@ -1239,6 +1399,20 @@ async function runGeneration(input: RunInput) {
         video: memeVideos.find((v) => v.id === chosen),
       };
     }
+    if (selection.format.viral && !selection.viralVideo) {
+      if (!viralVideos.length) {
+        throw new HttpError(
+          422,
+          'No viral videos are available. Ask an admin to add some.',
+        );
+      }
+      const ids = viralVideos.map((v) => v.id);
+      const chosen = pickAvoiding(ids, recent.videos);
+      selection = {
+        ...selection,
+        viralVideo: viralVideos.find((v) => v.id === chosen),
+      };
+    }
     tried.add(selection.format.id);
     log('selection', {
       draw,
@@ -1250,7 +1424,18 @@ async function runGeneration(input: RunInput) {
 
     const startedAt = Date.now();
     try {
-      const result = selection.format.meme
+      const result = selection.format.viral
+        ? await generateViralAttempt(
+            apiKey,
+            model,
+            app.name,
+            app.description ?? '',
+            profile,
+            profileJson,
+            selection,
+            bannedWords,
+          )
+        : selection.format.meme
         ? await generateMemeAttempt(
             apiKey,
             model,
@@ -1334,6 +1519,9 @@ async function runGeneration(input: RunInput) {
     attempt.payload,
     memeContext,
     assets.length > 0,
+    format.viral && attempt.selection.viralVideo
+      ? { video: attempt.selection.viralVideo, config: viralConfig }
+      : undefined,
   );
 
   const common = {
@@ -1453,6 +1641,7 @@ async function handleGenerate(event: ApiEvent): Promise<ApiResult> {
   const body = readBody(event);
   const owner = callerOwner(event);
   const client = await createClient();
+  await prepare(client);
   const result = await runGeneration({
     client,
     owner,
@@ -1460,7 +1649,10 @@ async function handleGenerate(event: ApiEvent): Promise<ApiResult> {
     localDate: requireLocalDate(body),
     unlimited: isAdmin(event),
     igFormat: readIgFormat(body.igFormat),
-    reelKind: body.reelKind === 'meme' ? 'meme' : undefined,
+    reelKind:
+      body.reelKind === 'meme' || body.reelKind === 'viral'
+        ? body.reelKind
+        : undefined,
   });
   return jsonResponse(200, result);
 }
@@ -1469,6 +1661,7 @@ async function handleRegenerate(event: ApiEvent): Promise<ApiResult> {
   const body = readBody(event);
   const owner = callerOwner(event);
   const client = await createClient();
+  await prepare(client);
   const pieceId = requireString(body, 'pieceId');
 
   const { data: piece } = await client.models.Content.get({ id: pieceId });
@@ -1502,6 +1695,277 @@ async function handleRegenerate(event: ApiEvent): Promise<ApiResult> {
   return jsonResponse(200, result);
 }
 
+/**
+ * Admin only: runs one format against an app's profile and returns the raw
+ * output. Nothing is saved and the daily limit is not touched.
+ */
+async function handleTestGenerate(event: ApiEvent): Promise<ApiResult> {
+  if (!isAdmin(event)) throw new HttpError(403, 'Admins only.');
+  const body = readBody(event);
+  const owner = callerOwner(event);
+  const client = await createClient();
+  clearStoreCache();
+  await prepare(client);
+
+  const formatId = Number(body.formatId);
+  const format = Number.isFinite(formatId) ? getFormat(formatId) : undefined;
+  if (!format) throw new HttpError(404, 'Format not found.');
+  const appId = requireString(body, 'appId');
+  const { data: app } = await client.models.Apps.get({ id: appId });
+  if (!app) throw new HttpError(404, 'App not found.');
+  if (app.owner && !ownerMatches(app.owner, owner)) {
+    throw new HttpError(403, 'Not your app.');
+  }
+
+  const profileRows = await client.models.AppProfile.list({
+    filter: { appId: { eq: appId } },
+  });
+  const profile = parseProfile(profileRows.data[0]);
+  const personas = profile.personas.filter((p) => p.name?.trim());
+  const features = profile.features.filter((f) => f.name?.trim());
+  if (!personas.length || !features.length) {
+    throw new HttpError(422, 'The app needs at least one persona and one feature.');
+  }
+  const brandKit = readBrandKit(profile.brand, app.logo);
+  if ((format.igFormat === 'CAROUSEL' || format.igFormat === 'IMAGE') && !brandKit) {
+    throw new HttpError(422, 'The app needs a complete brand kit for this format.');
+  }
+
+  const selection: Selection = {
+    format,
+    personaId: pickRandom(personas).id,
+    featureId: pickRandom(features).id,
+    pillar: pickRandom(PILLARS),
+  };
+  if (format.meme) {
+    const videos = await listMemeVideos(client);
+    if (!videos.length) throw new HttpError(422, 'No green screen videos in the library.');
+    selection.video = pickRandom(videos);
+  }
+  if (format.viral) {
+    const videos = await listViralVideos(client);
+    if (!videos.length) throw new HttpError(422, 'No viral videos in the library.');
+    selection.viralVideo = pickRandom(videos);
+  }
+
+  const apiKey = await loadOpenAiKey();
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const profileJson = JSON.stringify(profile);
+  const bannedWords = parseBannedWords(profile.voice);
+  const screenshotFeatures = profile.features
+    .filter((f) => (f.screenshot ?? '').trim())
+    .map((f) => ({ id: f.id, name: f.name }));
+
+  try {
+    const result = format.viral
+      ? await generateViralAttempt(
+          apiKey,
+          model,
+          app.name,
+          app.description ?? '',
+          profile,
+          profileJson,
+          selection,
+          bannedWords,
+        )
+      : format.meme
+        ? await generateMemeAttempt(
+            apiKey,
+            model,
+            app.name,
+            app.description ?? '',
+            profile,
+            profileJson,
+            selection,
+            bannedWords,
+            true,
+          )
+        : await generateAttempt(
+            apiKey,
+            model,
+            app.name,
+            profile,
+            profileJson,
+            selection,
+            bannedWords,
+            format.igFormat === 'CAROUSEL' && brandKit
+              ? carouselRules(
+                  brandKit,
+                  screenshotFeatures,
+                  format.stockPolicy ?? 'never',
+                  format.variant,
+                )
+              : format.igFormat === 'IMAGE' && brandKit
+                ? imageRules(brandKit, format.stockPolicy ?? 'never')
+                : '',
+            { screenshotIds: screenshotFeatures.map((f) => f.id) },
+          );
+    if (result.kind === 'skip') {
+      return jsonResponse(200, {
+        ok: true,
+        skipped: result.reason,
+        tokens: result.tokens + result.completion,
+      });
+    }
+    return jsonResponse(200, {
+      ok: true,
+      payload: result.attempt.payload,
+      tokens: result.attempt.promptTokens + result.attempt.completionTokens,
+      cost:
+        estimateCost(
+          model,
+          result.attempt.promptTokens,
+          result.attempt.completionTokens,
+        ) ?? null,
+      persona: personas.find((p) => p.id === selection.personaId)?.name,
+      feature: features.find((f) => f.id === selection.featureId)?.name,
+      pillar: selection.pillar,
+      video: selection.video?.title ?? selection.viralVideo?.title,
+    });
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 422) {
+      return jsonResponse(200, { ok: false, error: error.message });
+    }
+    throw error;
+  }
+}
+
+const DRAFT_IG_FORMATS = ['REEL', 'CAROUSEL', 'IMAGE', 'STORY'];
+const DRAFT_LAYOUTS = ['card', 'grid', 'columns', 'stack'];
+const DRAFT_VARIANTS = [
+  'steps',
+  'checklist',
+  'split',
+  'stat',
+  'quote',
+  'tier',
+  'cards',
+  'chat',
+  'level',
+  'timeline',
+  'grid',
+  'flags',
+  'editorial',
+  'template',
+  'poster',
+];
+const DRAFT_STOCK = ['never', 'allowed', 'preferred'];
+const DRAFT_INPUTS = [
+  'competitors',
+  'features.screenshot',
+  'proof.reviews',
+  'proof.comments',
+  'proof.stats',
+  'proof.milestones',
+  'proof.news',
+  'proof.offers',
+  'proof.images',
+];
+const DRAFT_PLACEHOLDERS = [
+  '{{app_name}}',
+  '{{persona}}',
+  '{{pillar}}',
+  '{{feature}}',
+  '{{app_profile_json}}',
+];
+
+function positiveInt(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+}
+
+/**
+ * Admin only: turns a free-text description into a filled format form. The
+ * result is returned for review, nothing is saved.
+ */
+async function handleDraftFormat(event: ApiEvent): Promise<ApiResult> {
+  if (!isAdmin(event)) throw new HttpError(403, 'Admins only.');
+  callerOwner(event);
+  const body = readBody(event);
+  const description = requireString(body, 'description');
+  if (description.length > 4000) {
+    throw new HttpError(400, 'Description is too long (max 4000 characters).');
+  }
+  const client = await createClient();
+  clearStoreCache();
+  await prepare(client);
+
+  const standard = FORMATS.filter((f) => f.kind !== 'meme' && f.kind !== 'viral');
+  const examples = [...standard]
+    .sort(() => Math.random() - 0.5)
+    .slice(0, 3)
+    .map((f) => ({
+      name: f.name,
+      group: f.group,
+      igFormat: f.igFormat,
+      structure: f.structure,
+      hooks: f.hooks.slice(0, 3),
+      promptTemplate: f.promptTemplate.slice(0, 700),
+      sharpen: f.sharpen ?? '',
+      layout: f.layout ?? '',
+      variant: f.variant ?? '',
+      lineCount: f.lineCount ?? 0,
+      stockPolicy: f.stockPolicy ?? 'never',
+    }));
+  const groups = [...new Set(FORMATS.map((f) => f.group).filter(Boolean))];
+
+  const p = prompts();
+  const system = p.fill(p.get('admin.format_draft'), {
+    groups: groups.join(', '),
+    inputs: DRAFT_INPUTS.join(', '),
+    variants: DRAFT_VARIANTS.join(', '),
+    examples: JSON.stringify(examples, null, 1),
+  });
+
+  const apiKey = await loadOpenAiKey();
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const result = await callOpenAi(
+    apiKey,
+    model,
+    system,
+    description,
+    FORMAT_DRAFT_SCHEMA,
+  );
+  const raw = result.payload as unknown as FormatDraft;
+
+  let promptTemplate = (raw.promptTemplate ?? '').trim();
+  const missing = DRAFT_PLACEHOLDERS.some((token) => !promptTemplate.includes(token));
+  if (missing) {
+    promptTemplate = `App: {{app_name}} | Persona: {{persona}} | Pillar: {{pillar}} | Feature to feature: {{feature}}\nApp Profile: {{app_profile_json}}\n\n${promptTemplate}`.trim();
+  }
+  const igFormat = DRAFT_IG_FORMATS.includes(raw.igFormat) ? raw.igFormat : 'REEL';
+  const format = {
+    name: (raw.name ?? '').trim(),
+    groupName: (raw.groupName ?? '').trim(),
+    igFormat,
+    structure: (raw.structure ?? '').trim(),
+    visual: (raw.visual ?? '').trim(),
+    cta: (raw.cta ?? '').trim(),
+    shareTrigger: (raw.shareTrigger ?? '').trim(),
+    hooks: (raw.hooks ?? []).map((h) => h.trim()).filter(Boolean).slice(0, 8),
+    promptTemplate,
+    extraRules: (raw.extraRules ?? '').trim(),
+    sharpen: (raw.sharpen ?? '').trim(),
+    requiredInputs: (raw.requiredInputs ?? []).filter((input) =>
+      DRAFT_INPUTS.includes(input),
+    ),
+    layout:
+      igFormat === 'IMAGE' && DRAFT_LAYOUTS.includes(raw.layout) ? raw.layout : '',
+    variant:
+      igFormat === 'CAROUSEL' && DRAFT_VARIANTS.includes(raw.variant)
+        ? raw.variant
+        : '',
+    lineCount: igFormat === 'IMAGE' ? positiveInt(raw.lineCount) : 0,
+    slideMin: igFormat === 'CAROUSEL' ? positiveInt(raw.slideMin) : 0,
+    slideMax: igFormat === 'CAROUSEL' ? positiveInt(raw.slideMax) : 0,
+    stockPolicy: DRAFT_STOCK.includes(raw.stockPolicy) ? raw.stockPolicy : 'never',
+  };
+  return jsonResponse(200, {
+    format,
+    tokens: result.promptTokens + result.completionTokens,
+  });
+}
+
 async function handleStockSearch(event: ApiEvent): Promise<ApiResult> {
   callerOwner(event);
   const body = readBody(event);
@@ -1522,7 +1986,7 @@ async function handleStockSearch(event: ApiEvent): Promise<ApiResult> {
 
 /**
  * HTTP API behind a Cognito JWT authorizer.
- * - POST /content/generate   { appId, localDate, igFormat?, reelKind?: 'meme' }
+ * - POST /content/generate   { appId, localDate, igFormat?, reelKind?: 'meme' | 'viral' }
  * - POST /content/regenerate { pieceId, localDate }
  * - POST /content/stock-search { query, type, page?, minSeconds? }
  */
@@ -1544,6 +2008,12 @@ export const handler = async (event: ApiEvent): Promise<ApiResult> => {
     if (path.endsWith('/content/generate')) return await handleGenerate(event);
     if (path.endsWith('/content/regenerate')) {
       return await handleRegenerate(event);
+    }
+    if (path.endsWith('/content/draft-format')) {
+      return await handleDraftFormat(event);
+    }
+    if (path.endsWith('/content/test-generate')) {
+      return await handleTestGenerate(event);
     }
     if (path.endsWith('/content/stock-search')) {
       return await handleStockSearch(event);

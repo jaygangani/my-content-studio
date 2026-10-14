@@ -1,6 +1,3 @@
-import catalogJson from './formats.json';
-import overridesJson from './format-overrides.json';
-
 export type IgFormat = 'REEL' | 'CAROUSEL' | 'IMAGE' | 'STORY';
 
 export interface FormatEntry {
@@ -27,9 +24,13 @@ export interface FormatEntry {
   stockPolicy?: 'never' | 'allowed' | 'preferred';
   /** Meme reel: a stock green screen video with AI text on top. */
   meme?: boolean;
+  /** Viral clip reel: tweet-style text above a stock viral video. */
+  viral?: boolean;
+  /** Pipeline selector. `standard` formats are plain text formats. */
+  kind?: 'standard' | 'meme' | 'viral';
+  enabled?: boolean;
+  sortOrder?: number;
 }
-
-export const MEME_FORMAT_ID = 9001;
 
 export type CarouselLayout =
   | 'steps'
@@ -50,15 +51,6 @@ export type CarouselLayout =
 
 export type Layout = 'card' | 'grid' | 'columns' | 'stack';
 
-interface FormatOverride {
-  layout?: Layout;
-  lineCount?: number;
-  sharpen?: string;
-  slideRange?: [number, number];
-  variant?: CarouselLayout;
-  stockPolicy?: 'never' | 'allowed' | 'preferred';
-}
-
 export const PILLARS = ['PAIN', 'HOW_TO', 'RESULT', 'MYTH', 'IDENTITY'] as const;
 export type Pillar = (typeof PILLARS)[number];
 
@@ -74,44 +66,6 @@ export function pillarLabel(pillar: Pillar): string {
   return PILLAR_LABELS[pillar];
 }
 
-const catalog = catalogJson as { systemPrompt: string; formats: FormatEntry[] };
-
-export const SYSTEM_PROMPT: string = catalog.systemPrompt;
-const overrides = overridesJson as unknown as Record<string, FormatOverride>;
-
-export const FORMATS: FormatEntry[] = catalog.formats.map((format) => {
-  const merged: FormatEntry = {
-    ...format,
-    ...(overrides[String(format.id)] ?? {}),
-  };
-  if (
-    (merged.igFormat === 'CAROUSEL' || merged.igFormat === 'IMAGE') &&
-    !merged.stockPolicy
-  ) {
-    merged.stockPolicy = 'never';
-  }
-  return merged;
-});
-
-FORMATS.push({
-  id: MEME_FORMAT_ID,
-  name: 'Meme Reel (Green Screen)',
-  group: 'Meme and Relatable',
-  igFormat: 'REEL',
-  igFormatLabel: 'Reel',
-  repostAs: '',
-  isMeme: true,
-  structure: 'One meme line over a looping green screen meme video.',
-  hooks: [],
-  visual: 'Green screen meme video over a stock photo or solid colour.',
-  cta: '',
-  shareTrigger: '',
-  promptTemplate: '',
-  extraRules: '',
-  requiredInputs: [],
-  meme: true,
-});
-
 export const TEXT_STYLE_KEYS = [
   'clean',
   'meme',
@@ -122,10 +76,6 @@ export const TEXT_STYLE_KEYS = [
   'caption',
   'poster',
 ] as const;
-
-export function getFormat(id: number): FormatEntry | undefined {
-  return FORMATS.find((format) => format.id === id);
-}
 
 export interface ProfileJson {
   personas: Array<{ id: string; name: string } & Record<string, string>>;
