@@ -28,6 +28,14 @@ export interface FormatEntry {
   viral?: boolean;
   /** Pipeline selector. `standard` formats are plain text formats. */
   kind?: 'standard' | 'meme' | 'viral';
+  /** Content type key: reel | carousel | image | story. */
+  contentType?: string;
+  /** Reel subtype key such as `reel.green-screen`. */
+  subtype?: string;
+  /** Stock library category the format draws assets from. */
+  assetCategory?: string;
+  /** Optional pin to specific stock assets. */
+  assetIds?: string[];
   enabled?: boolean;
   sortOrder?: number;
 }

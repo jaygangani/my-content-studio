@@ -47,6 +47,7 @@ const schema = a.schema({
       ctaText: a.string(),
       memeConfig: a.json(),
       viralConfig: a.json(),
+      reelConfig: a.json(),
     })
     .authorization((allow) => [allow.ownerDefinedIn('owner')]),
 
@@ -77,6 +78,10 @@ const schema = a.schema({
       slideMax: a.integer(),
       stockPolicy: a.string(),
       sortOrder: a.integer(),
+      contentType: a.string(),
+      subtype: a.string(),
+      assetCategory: a.string(),
+      assetIds: a.string().array(),
     })
     .authorization((allow) => [
       allow.authenticated().to(['read']),
@@ -91,6 +96,22 @@ const schema = a.schema({
       value: a.string().required(),
       enabled: a.boolean().required(),
       required: a.boolean(),
+    })
+    .authorization((allow) => [
+      allow.authenticated().to(['read']),
+      allow.groups(['admin']),
+    ]),
+
+  StockAsset: a
+    .model({
+      category: a.string().required(),
+      title: a.string().required(),
+      keywords: a.string().array(),
+      assetKey: a.string().required(),
+      mediaType: AssetType,
+      durationSeconds: a.float(),
+      keyColor: a.string(),
+      enabled: a.boolean().required(),
     })
     .authorization((allow) => [
       allow.authenticated().to(['read']),

@@ -42,6 +42,23 @@ function toEntry(row: Schema['FormatDef']['type']): FormatEntry {
   const slideRange: [number, number] | undefined =
     row.slideMin && row.slideMax ? [row.slideMin, row.slideMax] : undefined;
   const stock = row.stockPolicy;
+  const igFormat = (row.igFormat ?? 'REEL') as IgFormat;
+  const subtype =
+    row.subtype ||
+    (kind === 'meme'
+      ? 'reel.green-screen'
+      : kind === 'viral'
+        ? 'reel.tweet-style'
+        : igFormat === 'REEL'
+          ? 'reel.video-beats'
+          : '');
+  const assetCategory =
+    row.assetCategory ||
+    (subtype === 'reel.green-screen'
+      ? 'green-screen'
+      : subtype === 'reel.tweet-style'
+        ? 'viral-clip'
+        : '');
   return {
     id: row.formatId,
     name: row.name,
@@ -68,8 +85,12 @@ function toEntry(row: Schema['FormatDef']['type']): FormatEntry {
         ? stock
         : undefined,
     kind,
-    meme: kind === 'meme',
-    viral: kind === 'viral',
+    contentType: row.contentType || igFormat.toLowerCase(),
+    subtype: subtype || undefined,
+    assetCategory: assetCategory || undefined,
+    assetIds: clean(row.assetIds),
+    meme: subtype === 'reel.green-screen',
+    viral: subtype === 'reel.tweet-style',
     enabled: row.enabled,
     sortOrder: row.sortOrder ?? 0,
   };
@@ -107,6 +128,8 @@ export interface Prompts {
   get(key: string): string;
   /** Optional text. Empty string when missing or disabled. */
   optional(key: string): string;
+  /** First existing snippet among the keys. Throws when none exist. */
+  first(...keys: string[]): string;
   /** Replaces {{name}} placeholders and drops lines left empty. */
   fill(template: string, vars: Record<string, string>): string;
 }
@@ -154,6 +177,16 @@ export async function loadPrompts(client: DataClient): Promise<Prompts> {
         );
       }
       return row.value;
+    },
+    first(...keys) {
+      for (const key of keys) {
+        const row = map.get(key);
+        if (row) return row.value;
+      }
+      throw new HttpError(
+        503,
+        `Prompt "${keys[0]}" is missing. ${SEED_HINT}`,
+      );
     },
     optional(key) {
       const row = map.get(key);

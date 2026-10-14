@@ -440,7 +440,43 @@ async function recentPicks(client: DataClient, appId: string) {
   };
 }
 
-async function generateViralAttempt(
+interface CompactSpec {
+  /** Snippet keys tried in order for the default system prompt. */
+  systemKeys: string[];
+  schema: Record<string, unknown>;
+  /** Line length shown to the model; validation allows 2 more words. */
+  lineLimit: number;
+  clip: { title: string; keywords: string[] };
+  needsBackgroundQuery?: boolean;
+}
+
+/** Default snippet plus the format's own instructions, hooks and rules. */
+function compactSystem(format: FormatEntry, keys: string[]): string {
+  const base = prompts().first(...keys);
+  const extra = [
+    format.promptTemplate
+      .split('\n')
+      .filter((line) => !line.includes('{{'))
+      .join('\n')
+      .trim(),
+    format.extraRules.trim(),
+    format.sharpen?.trim() ?? '',
+    format.hooks.length
+      ? `Hook patterns (adapt, do not copy):\n- ${format.hooks.join('\n- ')}`
+      : '',
+  ].filter(Boolean);
+  return extra.length
+    ? `${base}\n\nFormat-specific instructions:\n${extra.join('\n\n')}`
+    : base;
+}
+
+/**
+ * One compact generation: small profile slice + clip title and keywords in,
+ * three line variants + caption + hashtags out. Shared by every subtype that
+ * writes text for a stock clip.
+ */
+async function generateCompactAttempt(
+  spec: CompactSpec,
   apiKey: string,
   model: string,
   appName: string,
@@ -455,8 +491,7 @@ async function generateViralAttempt(
 > {
   const persona = profile.personas.find((p) => p.id === selection.personaId);
   const feature = profile.features.find((f) => f.id === selection.featureId);
-  const video = selection.viralVideo;
-  if (!video) throw new HttpError(422, 'No viral video selected.');
+  const systemPrompt = compactSystem(selection.format, spec.systemKeys);
   const userPrompt = JSON.stringify({
     app: appName,
     about: description,
@@ -471,7 +506,10 @@ async function generateViralAttempt(
     pillar: pillarLabel(selection.pillar),
     voice: profile.voice,
     cta: profile.ctaText,
-    clip: { title: video.title, keywords: video.keywords },
+    clip: spec.clip,
+    ...(spec.needsBackgroundQuery !== undefined
+      ? { backgroundNeeded: spec.needsBackgroundQuery }
+      : {}),
   });
 
   let tokens = 0;
@@ -484,6 +522,7 @@ async function generateViralAttempt(
       : userPrompt;
     log('openai.request', {
       formatId: selection.format.id,
+      subtype: selection.format.subtype,
       round,
       model,
       promptChars: prompt.length,
@@ -491,13 +530,13 @@ async function generateViralAttempt(
     const result = await callOpenAi(
       apiKey,
       model,
-      prompts().get('viral.system'),
+      systemPrompt,
       prompt,
-      VIRAL_SCHEMA,
+      spec.schema,
     );
     tokens += result.promptTokens;
     completion += result.completionTokens;
-    const payload = result.payload as ViralLinesPayload;
+    const payload = result.payload as MemeLinesPayload | ViralLinesPayload;
 
     const skip = payload.skip?.trim();
     if (skip) return { kind: 'skip', reason: skip, tokens, completion };
@@ -506,7 +545,9 @@ async function generateViralAttempt(
     problems = [];
     if (lines.length < 3) problems.push('need 3 non-empty lines');
     lines.forEach((line, i) => {
-      if (words(line) > 22) problems.push(`line ${i + 1} is over 18 words`);
+      if (words(line) > spec.lineLimit + 2) {
+        problems.push(`line ${i + 1} is over ${spec.lineLimit} words`);
+      }
     });
     if (!payload.caption?.trim()) problems.push('caption is empty');
     if (!payload.hashtags?.length) problems.push('hashtags are empty');
@@ -543,6 +584,36 @@ async function generateViralAttempt(
   );
 }
 
+async function generateViralAttempt(
+  apiKey: string,
+  model: string,
+  appName: string,
+  description: string,
+  profile: ProfileJson,
+  profileJson: string,
+  selection: Selection,
+  bannedWords: string[],
+) {
+  const video = selection.viralVideo;
+  if (!video) throw new HttpError(422, 'No viral video selected.');
+  return generateCompactAttempt(
+    {
+      systemKeys: ['reel.tweet-style.system', 'viral.system'],
+      schema: VIRAL_SCHEMA,
+      lineLimit: 18,
+      clip: { title: video.title, keywords: video.keywords },
+    },
+    apiKey,
+    model,
+    appName,
+    description,
+    profile,
+    profileJson,
+    selection,
+    bannedWords,
+  );
+}
+
 function words(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -557,98 +628,25 @@ async function generateMemeAttempt(
   selection: Selection,
   bannedWords: string[],
   needsBackgroundQuery: boolean,
-): Promise<
-  | { kind: 'skip'; reason: string; tokens: number; completion: number }
-  | { kind: 'ok'; attempt: Attempt }
-> {
-  const persona = profile.personas.find((p) => p.id === selection.personaId);
-  const feature = profile.features.find((f) => f.id === selection.featureId);
+) {
   const video = selection.video;
   if (!video) throw new HttpError(422, 'No green screen video selected.');
-  const userPrompt = JSON.stringify({
-    app: appName,
-    about: description,
-    persona: persona && {
-      name: persona.name,
-      pain: persona.pain,
-      desiredResult: persona.desiredResult,
-      words: persona.words,
-      dailyMoments: persona.dailyMoments,
+  return generateCompactAttempt(
+    {
+      systemKeys: ['reel.green-screen.system', 'meme.system'],
+      schema: MEME_SCHEMA,
+      lineLimit: 12,
+      clip: { title: video.title, keywords: video.keywords },
+      needsBackgroundQuery,
     },
-    feature: feature && { name: feature.name, benefit: feature.benefit },
-    pillar: pillarLabel(selection.pillar),
-    voice: profile.voice,
-    cta: profile.ctaText,
-    clip: { title: video.title, keywords: video.keywords },
-    backgroundNeeded: needsBackgroundQuery,
-  });
-
-  let tokens = 0;
-  let completion = 0;
-  let problems: string[] = [];
-
-  for (let round = 0; round < 2; round += 1) {
-    const prompt = problems.length
-      ? `${userPrompt}\n\nFix these problems:\n- ${problems.join('\n- ')}`
-      : userPrompt;
-    log('openai.request', {
-      formatId: selection.format.id,
-      round,
-      model,
-      promptChars: prompt.length,
-    });
-    const result = await callOpenAi(
-      apiKey,
-      model,
-      prompts().get('meme.system'),
-      prompt,
-      MEME_SCHEMA,
-    );
-    tokens += result.promptTokens;
-    completion += result.completionTokens;
-    const payload = result.payload as MemeLinesPayload;
-
-    const skip = payload.skip?.trim();
-    if (skip) return { kind: 'skip', reason: skip, tokens, completion };
-
-    const lines = (payload.lines ?? []).map((l) => l.trim()).filter(Boolean);
-    problems = [];
-    if (lines.length < 3) problems.push('need 3 non-empty lines');
-    lines.forEach((line, i) => {
-      if (words(line) > 14) problems.push(`line ${i + 1} is over 12 words`);
-    });
-    if (!payload.caption?.trim()) problems.push('caption is empty');
-    if (!payload.hashtags?.length) problems.push('hashtags are empty');
-    const texts = [...lines, payload.caption ?? '', ...(payload.hashtags ?? [])];
-    problems.push(
-      ...findBannedWords(texts, bannedWords),
-      ...findInventedNumbers(
-        texts.filter((t) => !t.startsWith('#')),
-        profileJson,
-      ),
-    );
-    log('validation', {
-      formatId: selection.format.id,
-      round,
-      ok: problems.length === 0,
-      problems: problems.slice(0, 6),
-    });
-    if (!problems.length) {
-      return {
-        kind: 'ok',
-        attempt: {
-          selection,
-          payload: { ...payload, lines },
-          promptTokens: tokens,
-          completionTokens: completion,
-        },
-      };
-    }
-  }
-
-  throw new HttpError(
-    422,
-    `Draft failed validation after a retry: ${problems.slice(0, 3).join('; ')}`,
+    apiKey,
+    model,
+    appName,
+    description,
+    profile,
+    profileJson,
+    selection,
+    bannedWords,
   );
 }
 
@@ -853,6 +851,7 @@ function toMemeFields(
   const mode = meme.config.backgroundMode;
   const script = JSON.stringify({
     schema: 'REEL',
+    subtype: 'reel.green-screen',
     formatId: format.id,
     formatName: format.name,
     textStyle: 'meme',
@@ -911,6 +910,7 @@ function toViralFields(
   );
   const script = JSON.stringify({
     schema: 'REEL',
+    subtype: 'reel.tweet-style',
     formatId: format.id,
     formatName: format.name,
     textStyle: 'clean',
@@ -972,6 +972,7 @@ function toPieceFields(
   if (format.igFormat === 'REEL') unifyReel(payload as ReelPayload);
   const script = JSON.stringify({
     schema: format.igFormat,
+    subtype: format.igFormat === 'REEL' ? 'reel.video-beats' : undefined,
     formatId: format.id,
     formatName: format.name,
     textStyle: pickRandom(TEXT_STYLE_KEYS),
@@ -1150,7 +1151,58 @@ interface RunInput {
   reelKind?: 'meme' | 'viral';
 }
 
+interface StockRow {
+  id: string;
+  title: string;
+  keywords: string[];
+  assetKey: string;
+  durationSeconds: number;
+  keyColor: string;
+}
+
+/** Enabled stock assets of one category from the unified library. */
+async function listStock(
+  client: DataClient,
+  category: string,
+): Promise<StockRow[]> {
+  const rows: StockRow[] = [];
+  let nextToken: string | null | undefined;
+  do {
+    const page = await client.models.StockAsset.list({
+      limit: 500,
+      nextToken,
+      filter: { category: { eq: category } },
+    });
+    logGqlErrors('StockAsset.list', page.errors);
+    for (const row of page.data) {
+      if (row.enabled === false || !row.assetKey) continue;
+      rows.push({
+        id: row.id,
+        title: row.title,
+        keywords: (row.keywords ?? []).filter((k): k is string => !!k),
+        assetKey: row.assetKey,
+        durationSeconds: row.durationSeconds ?? 0,
+        keyColor: row.keyColor ?? '',
+      });
+    }
+    nextToken = page.nextToken;
+  } while (nextToken);
+  return rows;
+}
+
 async function listMemeVideos(client: DataClient): Promise<MemeVideo[]> {
+  const stock = (await listStock(client, 'green-screen')).filter(
+    (row) => row.keyColor,
+  );
+  if (stock.length) {
+    return stock.map((row) => ({
+      id: row.id,
+      title: row.title,
+      keywords: row.keywords,
+      videoKey: row.assetKey,
+      keyColor: row.keyColor,
+    }));
+  }
   const { data, errors } = await client.models.GreenScreenVideo.list({
     limit: 1000,
   });
@@ -1167,6 +1219,16 @@ async function listMemeVideos(client: DataClient): Promise<MemeVideo[]> {
 }
 
 async function listViralVideos(client: DataClient): Promise<ViralVideo[]> {
+  const stock = await listStock(client, 'viral-clip');
+  if (stock.length) {
+    return stock.map((row) => ({
+      id: row.id,
+      title: row.title,
+      keywords: row.keywords,
+      videoKey: row.assetKey,
+      durationSeconds: row.durationSeconds,
+    }));
+  }
   const { data, errors } = await client.models.ViralVideo.list({ limit: 1000 });
   logGqlErrors('ViralVideo.list', errors);
   return data
@@ -1290,7 +1352,14 @@ async function runGeneration(input: RunInput) {
   const personas = profile.personas.filter((p) => p.name?.trim());
   const features = profile.features.filter((f) => f.name?.trim());
 
-  const memeConfig = readMemeConfig(profileRows.data[0]?.memeConfig);
+  const profileRow = profileRows.data[0];
+  const reelConfigs = parseJsonField<Record<string, unknown>>(
+    profileRow?.reelConfig,
+    {},
+  );
+  const memeConfig = readMemeConfig(
+    reelConfigs['reel.green-screen'] ?? profileRow?.memeConfig,
+  );
   const wantMeme =
     input.reelKind === 'meme' ||
     Boolean(input.forced?.format.meme) ||
@@ -1317,7 +1386,9 @@ async function runGeneration(input: RunInput) {
     );
   }
 
-  const viralConfig = readViralConfig(profileRows.data[0]?.viralConfig);
+  const viralConfig = readViralConfig(
+    reelConfigs['reel.tweet-style'] ?? profileRow?.viralConfig,
+  );
   const wantViral =
     input.reelKind === 'viral' ||
     Boolean(input.forced?.format.viral) ||
@@ -1392,7 +1463,17 @@ async function runGeneration(input: RunInput) {
           'No green screen videos are available. Ask an admin to add some.',
         );
       }
-      const ids = memeVideos.map((v) => v.id);
+      const pinned = selection.format.assetIds ?? [];
+      const pool = pinned.length
+        ? memeVideos.filter((v) => pinned.includes(v.id))
+        : memeVideos;
+      if (!pool.length) {
+        throw new HttpError(
+          422,
+          'None of the pinned green screen videos are available for this app.',
+        );
+      }
+      const ids = pool.map((v) => v.id);
       const chosen = pickAvoiding(ids, recent.videos);
       selection = {
         ...selection,
@@ -1406,7 +1487,17 @@ async function runGeneration(input: RunInput) {
           'No viral videos are available. Ask an admin to add some.',
         );
       }
-      const ids = viralVideos.map((v) => v.id);
+      const pinned = selection.format.assetIds ?? [];
+      const pool = pinned.length
+        ? viralVideos.filter((v) => pinned.includes(v.id))
+        : viralVideos;
+      if (!pool.length) {
+        throw new HttpError(
+          422,
+          'None of the pinned viral clips are available for this app.',
+        );
+      }
+      const ids = pool.map((v) => v.id);
       const chosen = pickAvoiding(ids, recent.videos);
       selection = {
         ...selection,
@@ -1637,6 +1728,16 @@ async function createClient(): Promise<DataClient> {
   return generateClient<Schema>();
 }
 
+/** Accepts a reel `subtype` key, or the legacy `reelKind` value. */
+function reelKindFrom(body: Record<string, unknown>): 'meme' | 'viral' | undefined {
+  if (body.subtype === 'reel.green-screen') return 'meme';
+  if (body.subtype === 'reel.tweet-style') return 'viral';
+  if (body.reelKind === 'meme' || body.reelKind === 'viral') {
+    return body.reelKind;
+  }
+  return undefined;
+}
+
 async function handleGenerate(event: ApiEvent): Promise<ApiResult> {
   const body = readBody(event);
   const owner = callerOwner(event);
@@ -1649,10 +1750,7 @@ async function handleGenerate(event: ApiEvent): Promise<ApiResult> {
     localDate: requireLocalDate(body),
     unlimited: isAdmin(event),
     igFormat: readIgFormat(body.igFormat),
-    reelKind:
-      body.reelKind === 'meme' || body.reelKind === 'viral'
-        ? body.reelKind
-        : undefined,
+    reelKind: reelKindFrom(body),
   });
   return jsonResponse(200, result);
 }
@@ -1890,7 +1988,7 @@ async function handleDraftFormat(event: ApiEvent): Promise<ApiResult> {
   clearStoreCache();
   await prepare(client);
 
-  const standard = FORMATS.filter((f) => f.kind !== 'meme' && f.kind !== 'viral');
+  const standard = FORMATS.filter((f) => !f.meme && !f.viral);
   const examples = [...standard]
     .sort(() => Math.random() - 0.5)
     .slice(0, 3)
@@ -1986,7 +2084,7 @@ async function handleStockSearch(event: ApiEvent): Promise<ApiResult> {
 
 /**
  * HTTP API behind a Cognito JWT authorizer.
- * - POST /content/generate   { appId, localDate, igFormat?, reelKind?: 'meme' | 'viral' }
+ * - POST /content/generate   { appId, localDate, igFormat?, reelKind?: 'meme' | 'viral', subtype?: string }
  * - POST /content/regenerate { pieceId, localDate }
  * - POST /content/stock-search { query, type, page?, minSeconds? }
  */
