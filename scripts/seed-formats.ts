@@ -1,25 +1,28 @@
 /**
- * Seeds the FormatDef and PromptSnippet tables straight into DynamoDB.
+ * Seeds the FormatDef and PromptSnippet models through the GraphQL API, signed
+ * in as an admin user. Works the same for a sandbox and for production: it
+ * only needs the matching amplify outputs file.
  *
  * Run it yourself, only when you mean to write to the cloud:
- *   AWS_PROFILE=jaygangani AWS_REGION=ap-south-1 npm run seed:formats -- --dry-run
- *   AWS_PROFILE=jaygangani AWS_REGION=ap-south-1 npm run seed:formats
+ *   npm run seed:formats -- --dry-run
+ *   npm run seed:formats                                  # ./amplify_outputs.json
+ *   npm run seed:formats -- --outputs outputs/main/amplify_outputs.json
+ *
+ * Credentials: SEED_EMAIL and SEED_PASSWORD env vars, or you are prompted.
+ * The user must be in the Cognito `admin` group.
  *
  * Insert-only by default: rows that already exist (and may have been edited
  * by an admin) are left alone. Pass --overwrite to replace them.
- *
- * Table names are discovered by prefix (FormatDef-, PromptSnippet-). When more
- * than one environment exists, set FORMAT_TABLE and PROMPT_TABLE.
  */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
-  ConditionalCheckFailedException,
-  DynamoDBClient,
-  ListTablesCommand,
-  PutItemCommand,
-} from '@aws-sdk/client-dynamodb'
-import { marshall } from '@aws-sdk/util-dynamodb'
+  connectAsAdmin,
+  disconnect,
+  failure,
+  outputsPathFrom,
+} from './lib/admin-client'
+import type { AdminClient } from './lib/admin-client'
 
 type Json = Record<string, unknown>
 
@@ -58,21 +61,29 @@ interface SeedPrompt {
   required: boolean
 }
 
+const CONTENT_TYPE: Record<string, string> = {
+  REEL: 'reel',
+  CAROUSEL: 'carousel',
+  IMAGE: 'image',
+  STORY: 'story',
+}
+
 const root = resolve(import.meta.dirname, '..')
 const dir = resolve(root, 'scripts/seed-data')
 const read = <T>(file: string): T =>
   JSON.parse(readFileSync(resolve(dir, file), 'utf8')) as T
 
-const args = new Set(process.argv.slice(2))
+const argv = process.argv.slice(2)
+const args = new Set(argv)
 const dryRun = args.has('--dry-run')
 const overwrite = args.has('--overwrite')
+const outputsPath = outputsPathFrom(argv)
 
 const catalog = read<{ systemPrompt: string; formats: SeedFormat[] }>('formats.json')
 const overrides = read<Record<string, FormatOverride>>('format-overrides.json')
 const prompts = read<SeedPrompt[]>('prompts.json')
 
 function formatItems(): Json[] {
-  const now = new Date().toISOString()
   const rows: Json[] = catalog.formats.map((format, index) => {
     const extra = overrides[String(format.id)] ?? {}
     const stockDefault =
@@ -81,9 +92,6 @@ function formatItems(): Json[] {
         : undefined
     return {
       id: `format-${format.id}`,
-      __typename: 'FormatDef',
-      createdAt: now,
-      updatedAt: now,
       formatId: format.id,
       name: format.name,
       groupName: format.group,
@@ -109,6 +117,8 @@ function formatItems(): Json[] {
       slideMax: extra.slideRange?.[1],
       stockPolicy: extra.stockPolicy ?? stockDefault,
       sortOrder: index + 1,
+      contentType: CONTENT_TYPE[format.igFormat],
+      subtype: format.igFormat === 'REEL' ? 'reel.video-beats' : undefined,
     }
   })
   const special = (
@@ -120,9 +130,6 @@ function formatItems(): Json[] {
     order: number,
   ): Json => ({
     id: `format-${formatId}`,
-    __typename: 'FormatDef',
-    createdAt: now,
-    updatedAt: now,
     formatId,
     name,
     groupName: 'Meme and Relatable',
@@ -141,6 +148,9 @@ function formatItems(): Json[] {
     hooks: [],
     requiredInputs: [],
     sortOrder: order,
+    contentType: 'reel',
+    subtype: kind === 'meme' ? 'reel.green-screen' : 'reel.tweet-style',
+    assetCategory: kind === 'meme' ? 'green-screen' : 'viral-clip',
   })
   rows.push(
     special(
@@ -164,12 +174,8 @@ function formatItems(): Json[] {
 }
 
 function promptItems(): Json[] {
-  const now = new Date().toISOString()
   return prompts.map((prompt) => ({
     id: `snippet-${prompt.key}`,
-    __typename: 'PromptSnippet',
-    createdAt: now,
-    updatedAt: now,
     key: prompt.key,
     label: prompt.label,
     description: prompt.description,
@@ -179,57 +185,83 @@ function promptItems(): Json[] {
   }))
 }
 
-async function findTable(
-  client: DynamoDBClient,
-  prefix: string,
-  envName: string,
-): Promise<string> {
-  const fromEnv = process.env[envName]
-  if (fromEnv) return fromEnv
-  const names: string[] = []
-  let start: string | undefined
-  do {
-    const page = await client.send(
-      new ListTablesCommand({ ExclusiveStartTableName: start }),
-    )
-    names.push(...(page.TableNames ?? []))
-    start = page.LastEvaluatedTableName
-  } while (start)
-  const matches = names.filter((name) => name.startsWith(prefix))
-  if (matches.length === 1) return matches[0]
-  if (matches.length === 0) {
-    throw new Error(
-      `No table starting with ${prefix} found. Deploy the backend first, or set ${envName}.`,
-    )
-  }
-  throw new Error(
-    `Several tables start with ${prefix}:\n  ${matches.join('\n  ')}\nSet ${envName} to the one you want.`,
-  )
+interface Counts {
+  created: number
+  updated: number
+  skipped: number
 }
 
-async function write(
-  client: DynamoDBClient,
-  table: string,
-  items: Json[],
-): Promise<{ written: number; skipped: number }> {
-  let written = 0
-  let skipped = 0
+type Client = AdminClient
+
+async function seedFormats(client: Client, items: Json[]): Promise<Counts> {
+  const counts: Counts = { created: 0, updated: 0, skipped: 0 }
+  const existing = new Set<string>()
+  let nextToken: string | null | undefined
+  do {
+    const page = await client.models.FormatDef.list({ limit: 500, nextToken })
+    if (page.errors?.length) throw new Error(failure(page.errors))
+    for (const row of page.data) existing.add(row.id)
+    nextToken = page.nextToken
+  } while (nextToken)
+
   for (const item of items) {
-    try {
-      await client.send(
-        new PutItemCommand({
-          TableName: table,
-          Item: marshall(item, { removeUndefinedValues: true }),
-          ConditionExpression: overwrite ? undefined : 'attribute_not_exists(id)',
-        }),
+    const id = item.id as string
+    if (existing.has(id)) {
+      if (!overwrite) {
+        counts.skipped += 1
+        continue
+      }
+      const result = await client.models.FormatDef.update(
+        item as Parameters<typeof client.models.FormatDef.update>[0],
       )
-      written += 1
-    } catch (error) {
-      if (error instanceof ConditionalCheckFailedException) skipped += 1
-      else throw error
+      if (result.errors?.length) throw new Error(failure(result.errors))
+      counts.updated += 1
+      continue
     }
+    const result = await client.models.FormatDef.create(
+      item as Parameters<typeof client.models.FormatDef.create>[0],
+    )
+    if (result.errors?.length) throw new Error(failure(result.errors))
+    counts.created += 1
   }
-  return { written, skipped }
+  return counts
+}
+
+async function seedPrompts(client: Client, items: Json[]): Promise<Counts> {
+  const counts: Counts = { created: 0, updated: 0, skipped: 0 }
+  const existing = new Set<string>()
+  let nextToken: string | null | undefined
+  do {
+    const page = await client.models.PromptSnippet.list({
+      limit: 500,
+      nextToken,
+    })
+    if (page.errors?.length) throw new Error(failure(page.errors))
+    for (const row of page.data) existing.add(row.id)
+    nextToken = page.nextToken
+  } while (nextToken)
+
+  for (const item of items) {
+    const id = item.id as string
+    if (existing.has(id)) {
+      if (!overwrite) {
+        counts.skipped += 1
+        continue
+      }
+      const result = await client.models.PromptSnippet.update(
+        item as Parameters<typeof client.models.PromptSnippet.update>[0],
+      )
+      if (result.errors?.length) throw new Error(failure(result.errors))
+      counts.updated += 1
+      continue
+    }
+    const result = await client.models.PromptSnippet.create(
+      item as Parameters<typeof client.models.PromptSnippet.create>[0],
+    )
+    if (result.errors?.length) throw new Error(failure(result.errors))
+    counts.created += 1
+  }
+  return counts
 }
 
 async function main() {
@@ -240,15 +272,18 @@ async function main() {
     console.log('Dry run, nothing written.')
     return
   }
-  const client = new DynamoDBClient({})
-  const formatTable = await findTable(client, 'FormatDef-', 'FORMAT_TABLE')
-  const promptTable = await findTable(client, 'PromptSnippet-', 'PROMPT_TABLE')
-  console.log(`Writing to ${formatTable} and ${promptTable}`)
+
   console.log(overwrite ? 'Mode: overwrite existing rows' : 'Mode: insert only')
-  const f = await write(client, formatTable, formats)
-  const p = await write(client, promptTable, snippets)
-  console.log(`Formats written ${f.written}, skipped ${f.skipped}`)
-  console.log(`Prompts written ${p.written}, skipped ${p.skipped}`)
+  const client = await connectAsAdmin(outputsPath)
+  const f = await seedFormats(client, formats)
+  const p = await seedPrompts(client, snippets)
+  console.log(
+    `Formats: created ${f.created}, updated ${f.updated}, skipped ${f.skipped}`,
+  )
+  console.log(
+    `Prompts: created ${p.created}, updated ${p.updated}, skipped ${p.skipped}`,
+  )
+  await disconnect()
 }
 
 main().catch((error: unknown) => {

@@ -14,16 +14,16 @@
     "required": true
   },
   {
-    "key": "meme.system",
-    "label": "Meme reel prompt",
-    "description": "System prompt for meme reels (green screen video + text).",
+    "key": "reel.green-screen.system",
+    "label": "Meme reel prompt (green screen)",
+    "description": "Default system prompt for formats under reel.green-screen. A format's own prompt template wins when set.",
     "value": "You write the on-screen text for an Instagram meme reel for a consumer app.\nA green screen meme video plays behind the text. You only write the words.\nWrite 3 different meme lines, each at most 12 words, that fit the clip title and keywords and the persona's real moment.\nRules:\n- Use only facts that appear in the input. Never invent numbers, stats, reviews or offers.\n- Relatable and specific beats generic. The app is named only if it is the natural punchline.\n- Follow the voice. Never use banned words or forbidden claims.\n- caption: at most 25 words. hashtags: 4 to 6, each starting with #.\n- bg_query: a concrete 2 to 4 word photo scene for the background, or an empty string if not needed.\n- If a required fact is missing, set \"skip\" to a short reason and leave the rest empty. Otherwise \"skip\" is an empty string.\nReturn valid JSON only.",
     "required": true
   },
   {
-    "key": "viral.system",
-    "label": "Viral clip reel prompt",
-    "description": "System prompt for viral clip reels (tweet-style text over a video).",
+    "key": "reel.tweet-style.system",
+    "label": "Tweet-style reel prompt",
+    "description": "Default system prompt for formats under reel.tweet-style. A format's own prompt template wins when set.",
     "value": "You write the on-screen text for an Instagram reel for a consumer app.\nThe text is shown as a tweet-style line in a black header above a viral video that plays below it. You only write the words.\nWrite 3 different lines, each at most 18 words, that fit the clip title and keywords and the persona's real moment.\nRules:\n- Write like a short relatable post: a plain statement or a \"POV:\" scene that the viewer recognises at once.\n- Use only facts that appear in the input. Never invent numbers, stats, reviews or offers.\n- Specific beats generic. The app is named only if it is the natural punchline.\n- Follow the voice. Never use banned words or forbidden claims.\n- caption: at most 25 words. hashtags: 4 to 6, each starting with #.\n- If a required fact is missing, set \"skip\" to a short reason and leave the rest empty. Otherwise \"skip\" is an empty string.\nReturn valid JSON only.",
     "required": true
   },
