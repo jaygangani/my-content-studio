@@ -1,7 +1,8 @@
 # Carousel visual strategy
 
 Applies to every carousel format (1080 x 1350, 4:5). Enforced in code through
-`stockPolicy` in `amplify/functions/generate-content/format-overrides.json`
+`stockPolicy` on the format (admin screen `/admin/formats`, seeded from
+`scripts/seed-data/format-overrides.json`)
 (prompt rules, validation, editor options and the quality checklist).
 
 ## Image source order
@@ -72,9 +73,9 @@ library and brand look stay consistent.
 
 ## Changing the policy
 
-Edit `stockPolicy` for the format id in `format-overrides.json` (`"never"`,
-`"allowed"` or `"preferred"`; unspecified carousels default to `never`). No
-code change needed.
+Set the format's **Stock photo** field in `/admin/formats` (`never`,
+`allowed` or `preferred`; unspecified carousels default to `never`). No code
+change or deploy needed.
 
 ## Layout library (15 designs)
 

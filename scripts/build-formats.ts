@@ -23,10 +23,7 @@ interface FormatEntry {
 
 const root = resolve(import.meta.dirname, '..')
 const source = resolve(root, 'docs/72-short-form-content-formats (2).md')
-const target = resolve(
-  root,
-  'amplify/functions/generate-content/formats.json',
-)
+const target = resolve(root, 'scripts/seed-data/formats.json')
 
 const text = readFileSync(source, 'utf8')
 
